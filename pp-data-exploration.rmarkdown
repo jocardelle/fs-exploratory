@@ -1,0 +1,591 @@
+---
+title: "Processed Products Exploratory Analysis"
+author: "Josephine Cardelle"
+format: html
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+This data contains information regarding processed seafood products on the West Coast. It contains information in regard to revenue and products purchased and employment data for the processors. The employment data dates back to 1970.
+
+# Set up
+
+## Libraries
+
+
+
+```{r}
+library(tidyverse)
+library(here)
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(janitor)
+library(lubridate)
+library(tidygeocoder)
+library(sf)
+library(tmap)
+library(patchwork)
+library(stringr)
+library(plotly)
+library(scales)
+library(pals)
+library(paletteer)
+library(tigris)
+library(snakecase)
+```
+
+
+
+## Load data
+
+
+
+```{r}
+pp_emp <- read_excel(here("data/processed_products/westcoast_pp_employment.xlsx")) %>% 
+  clean_names()
+
+pp_address <- read_excel(here("data/processed_products/pp_address_23.xlsx")) %>% 
+  clean_names()
+
+pp_processed <- read_csv(here("data/processed_products/pp_processed.csv")) %>% 
+  clean_names()
+
+pp_names <- read_csv(here("data/processed_products/pp_names.csv")) %>% 
+  clean_names()
+
+# PROCESSOR PORT INFORMATION - USE TO GET SUBREGIONS
+pp_ports <- read_csv(here("data/processed_products/processor_port.csv"))
+```
+
+```{r}
+pp_ports$io_pac_port_group <- to_snake_case(pp_ports$io_pac_port_group)
+
+pp_ports <- pp_ports %>%
+  mutate(
+    region = case_when(
+      io_pac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
+      io_pac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
+      io_pac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
+      io_pac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
+      io_pac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
+    )
+  )
+
+pp_product_codes <- pp_names %>% 
+  select(pp_code, pp_dscp) %>% 
+  distinct()
+
+pp <- left_join(pp_processed, pp_product_codes, by = "pp_code")
+
+
+```
+
+
+
+# Data Exploration
+
+
+
+```{r}
+# Check columns and size
+head(pp_emp)
+head(pp)
+head(pp_address)
+dim(pp_emp)
+dim(pp)
+dim(pp_address)
+
+# Clean names
+pp_emp <- pp_emp %>% 
+  clean_names()
+pp <- pp %>% 
+  clean_names()
+pp_address <- pp_address %>% 
+  clean_names()
+
+# Check if any of the id number columns have leading zeros
+sum(startsWith(pp_emp$pp_idnum, "0"))
+sum(startsWith(pp_address$pp_idnum, "0"))
+
+# No leading zeros, change id and year column to numeric
+pp$pp_idnum <- as.numeric(pp$pp_idnum)
+pp_emp$pp_idnum <- as.numeric(pp_emp$pp_idnum)
+pp_address$pp_idnum <- as.numeric(pp_address$pp_idnum)
+pp$year <- as.numeric(pp$year)
+pp_emp$year <- as.numeric(pp_emp$year)
+
+# Check number of distinct pp_idnum in each dataset
+print(n_distinct(pp_emp$pp_idnum))
+print(n_distinct(pp$pp_idnum))
+print(n_distinct(pp_address$pp_idnum))
+
+n_distinct(pp$pp_code) # What is pp_code? maybe its the product code?
+n_distinct(pp$product)
+
+# Check years included
+print(unique(pp_emp$year))
+print(unique(pp$year))
+```
+
+
+
+The products data has significantly fewer processors included than the employment and address data.
+
+
+
+```{r}
+# Change month to a column
+pp_employment <- pp_emp %>% 
+  pivot_longer(
+    cols = ends_with("_emp"),
+    names_to = "month",
+    values_to = "employees",
+    names_pattern = "(.*)_emp"
+  )
+
+# Change month to a number value
+pp_employment <- pp_employment %>% 
+  mutate(month = match(tolower(month), tolower(month.abb)))
+```
+
+```{r}
+# Combiner employment and plant state information
+# pp_states <- pp_address %>% 
+#   select(pp_idnum, plant_state_abrv)
+
+emp_states <- left_join(pp_employment, pp_ports, by = "pp_idnum")
+
+# Check rows with na plant_state
+emp_states_na <- emp_states %>% 
+  filter(is.na(state_abrv))
+
+print(n_distinct(emp_states_na$pp_idnum))
+
+# Some of these have "at sea processor" under plant city.. keep those for now?
+# Filter to west coast or at sea processor that has NA 
+wc_emp <- emp_states %>% 
+  filter(plant_state_abrv %in% c("OR", "WA", "CA") | 
+           (plant_city == "AT SEA PROCESSOR" & 
+              (is.na(plant_state_abrv))) |
+           (state_abrv %in% c("OR", "WA", "CA") &
+              (is.na(plant_state_abrv))))
+
+write.csv(wc_emp, file = here("data/processed_products/pp_wc.csv"), row.names = FALSE)
+
+# Check number of processors compared to the products dataset
+print(n_distinct(wc_emp$pp_idnum))
+print(n_distinct(pp$pp_idnum))
+print(n_distinct(pp_employment$pp_idnum))
+
+# Still a big discrepency, check after 2011
+wc_emp_2011 <- wc_emp %>%
+  filter(year >= 2011)
+
+# Check processor numbers again
+print(n_distinct(wc_emp_2011$pp_idnum))
+print(n_distinct(pp$pp_idnum))
+```
+
+
+
+## Average processor monthly employment
+
+
+
+```{r}
+# Find monthly average employment for each state
+monthly_avg <- wc_emp %>% 
+  group_by(plant_state_abrv, year, month) %>% 
+  summarize(avg_emp = mean(employees, na.rm = TRUE)) %>% 
+  mutate(date = make_date(year, month, 1))
+
+
+# Or monthly average by year?
+monthly_avg <- pp_ports %>% 
+  group_by(region, year, month) %>% 
+  summarize(avg_emp = mean(employees, na.rm = TRUE)) %>% 
+  mutate(date = make_date(year, month, 1))
+
+```
+
+
+
+# Average Monthly Employment by State Plot
+
+
+
+```{r}
+# Plot average monthly employee count over time by state
+state_avg_emp <- ggplot(monthly_avg, aes(x = date, y = avg_emp, group = plant_state_abrv, color = plant_state_abrv)) +
+  geom_line(linewidth = 1) +
+  scale_color_viridis_d() +
+  scale_x_date(date_breaks = "10 years", 
+               date_labels = "%Y", 
+               limits = c(as.Date("1970-01-01"), NA), 
+               expand = c(0,0)) +
+  ggtitle("Average Monthly Processor Employee Count") +
+  xlab("Year") +
+  ylab("Number of Employees") +
+  labs(color = "State") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+state_avg_emp
+```
+
+
+
+# Monthly trends
+
+
+
+```{r}
+ggplot(wc_emp, aes(x = year, y = employees)) +
+  geom_line() +
+  facet_wrap(~month) +
+  labs(title = "Employment by month",
+       x = "Year",
+       y = "Number of employees") +
+  theme_minimal()
+```
+
+
+
+# Heat map for months
+
+
+
+```{r}
+wc_emp %>% 
+  group_by(year, month) %>% 
+  summarise(avg_employment = mean(employees, na.rm = TRUE), .groups = "drop") %>% 
+  mutate(month_name = month.abb[month]) %>% 
+  ggplot(aes(x = month_name, y = year, fill = avg_employment)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "C") +
+  scale_x_discrete(limits = month.abb) +
+  labs(title = "Average Monthly Employment",
+       x = "Month",
+       fill = "Average Employee Count",
+       y = "Year") +
+  theme_minimal()
+
+```
+
+
+
+# Location Exploration
+
+
+
+```{r}
+# Add a full address column
+# SHOULD I BE USING PLANT ADDRESS?
+wc_address_city <- wc_emp %>%
+  mutate(full_address = paste(plant_city, plant_state_abrv, plant_zip, sep = ", "))
+
+# # Get coordinates of address for mapping
+# wc_address_city <- wc_address_city %>%
+#   geocode(
+#     address = full_address,
+#     method = "osm",
+#     lat = latitude,
+#     long = longitude
+#   )
+# # 
+# write.csv(wc_address_city, file = here("data/pp_coordinates_city.csv"), row.names = FALSE)
+# 
+# write.csv(wc_address_city, file = here("data/pp_coordinates_zip.csv"), row.names = FALSE)
+# n_distinct(wc_address$plant_city)
+
+```
+
+```{r}
+# Read in data with coordinates
+#processor_coords <- read_csv(here("data/processed_products/pp_coordinates.csv"))
+#processor_city_coords <- read_csv(here("data/processed_products/pp_coordinates_city.csv"))
+
+processor_zip_coords <- read_csv(here("data/processed_products/pp_coordinates_zip.csv"))
+```
+
+
+
+## Map
+
+
+
+```{r}
+# Get average employees by city
+avg_emp_city <- pp_ports %>% 
+  group_by(longitude, latitude, plant_city) %>% 
+  summarise(avg_employees = mean(employees, na.rm = TRUE))
+
+# Convert to sf
+wc_avg_coords <- avg_emp_city %>% 
+  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = 4326)
+
+tmap_mode("view")
+avg_emp_map <- tm_shape(wc_avg_coords, id = "city") +
+  tm_bubbles(size = "avg_employees",
+             fill = "avg_employees",
+             palette = colorRampPalette(ggthemes::Color_Blind)(100),
+             size.legend = tm_legend_hide(),
+             fill.legend = tm_legend(title = "Average Employees")) +
+  tm_borders() +
+  tm_legend(legend.outside = TRUE) +
+  tm_layout(legend.common = TRUE) +
+  tm_basemap("CartoDB.PositronNoLabels") +
+  tm_title(
+    text = "Average Monthly employees") +
+  tm_scalebar() +
+  tm_compass()
+
+avg_emp_map
+```
+
+
+
+# Yearly Revenue by State
+
+
+
+```{r}
+pp <- left_join(pp, pp_address, by = "pp_idnum")
+
+wc_pp <- pp %>% 
+    filter(plant_state_abrv %in% c("OR", "WA", "CA") | 
+           (plant_city == "AT SEA PROCESSOR" & 
+              (is.na(plant_state_abrv))) |
+           (state_abrv %in% c("OR", "WA", "CA") &
+              (is.na(plant_state_abrv))))
+
+
+state_revenue <- wc_pp %>% 
+  group_by(year, plant_state_abrv) %>% 
+  summarise(wholesale = (sum(dollars, na.rm = TRUE))/10000000)
+
+revenue <- ggplot(state_revenue, aes(x = year, y = wholesale, group = plant_state_abrv, color = plant_state_abrv)) +
+  geom_line(linewidth = 1) +
+  scale_color_viridis_d() +
+  scale_x_continuous(breaks = seq(1969, 2022, by = 10)) +
+  ggtitle("Yearly wholesale sum by state") +
+  xlab("Year") +
+  ylab("Wholesale ($10M)") +
+  labs(color = "State") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+revenue
+```
+
+
+
+# Revenue and Employment
+
+
+
+```{r}
+state_revenue$date <- as.Date(paste0(state_revenue$year, "-01-01"))
+
+revenue_date <- ggplot(state_revenue, aes(x = date, y = wholesale, group = plant_state_abrv, color = plant_state_abrv)) +
+  geom_line(linewidth = 1) +
+  scale_color_viridis_d() +
+    scale_x_date(date_breaks = "10 years", 
+               date_labels = "%Y", 
+               limits = c(as.Date("1969-01-01"), as.Date("2022-12-31")), 
+               expand = c(0,0)) +
+  ggtitle("Yearly Wholesale Sum by State") +
+  xlab("Year") +
+  ylab("Wholesale ($10M)") +
+  labs(color = "State") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+revenue_date
+
+state_avg_emp_1969 <- ggplot(monthly_avg, aes(x = date, y = avg_emp, group = plant_state_abrv, color = plant_state_abrv)) +
+  geom_line(linewidth = 1) +
+  scale_color_viridis_d() +
+  scale_x_date(date_breaks = "10 years", 
+               date_labels = "%Y", 
+               limits = c(as.Date("1969-01-01"), as.Date("2022-12-31")), 
+               expand = c(0,0)) +
+  ggtitle("Average Monthly Processor Employee Count") +
+  xlab("Year") +
+  ylab("Number of Employees") +
+  labs(color = "State") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+state_avg_emp_1969 / revenue_date
+```
+
+
+
+# Products
+
+## Wholesale
+
+
+
+```{r}
+# Create list of generalized products
+wc_pp <- wc_pp %>% 
+  rename(product = pp_dscp)
+
+general_products <- c(
+  "SALMON" = "SALMON",
+  "TUNA" = "TUNA",
+  "HAKE" = "HAKE",
+  "WAHOO" = "WAHOO",
+  "CRAB" = "CRAB",
+  "HALIBUT" = "HALIBUT",
+  "SABLEFISH" = "SABLEFISH",
+  "SQUID" = "SQUID",
+  "SHRIMP" = "SHRIMP",
+  "BONITO" = "TUNA",
+  "COD" = "COD",
+  "CUCUMBER" = "SEA CUCUMBER",
+  "FLOUNDER" = "FLOUNDER",
+  "POLLOCK" = "POLLOCK",
+  "PERCH" = "ROCKFISH",
+  "ROCKFISH" = "ROCKFISH",
+  "TROUT" = "TROUT",
+  "CLAM" = "CLAMS",
+  "OYSTER" = "OYSTERS",
+  "SWORD" = "SWORDFISH",
+  "DRUM" = "DRUM",
+  "TILAPIA" = "TILAPIA",
+  "BASS" = "BASS",
+  "GROUPER" = "GROUPER",
+  "MARLIN" = "MARLIN",
+  "ESCOLAR" = "ESCOLAR",
+  "OCTOPUS" = "OCTOPUS",
+  "BUFFALO" = "BUFFALOFISH",
+  "STURGEON" = "STURGEON",
+  "MUSSEL" = "MUSSELS",
+  "SKATE" = "SKATES",
+  "LOBSTER" = "LOBSTER",
+  "DOLPHIN" = "DORADO",
+  "OPAH" = "OPAH",
+  "ANGLER" = "ANGLER",
+  "ROUGHY" = "ORANGE ROUGHY",
+  "CRAW" = "CRAWFISH",
+  "SMELT" = "SMELT",
+  "JACK" = "JACK",
+  "SARDINE" = "SARDINE",
+  "SEAWEED" = "SEAWEED",
+  "HERRING" = "HERRING",
+  "MACKEREL" = "MACKEREL",
+  "SCALLOP" = "SCALLOPS"
+)
+
+# Loop through the generalized terms
+wc_pp <- wc_pp %>%
+  mutate(product_general = sapply(product, function(x) {
+    match <- names(general_products)[str_detect(x, names(general_products))]
+    if (length(match) > 0) {
+      general_products[match[1]]
+    } else if (str_detect(x, "UNCL")) { #UNCL to unclassified if didn't match others
+      "UNCLASSIFIED"
+    } else {
+      "OTHER" # Assigned other if nothing else
+    }
+  }))
+
+write.csv(wc_pp, file = here("data/processed_products/products_general.csv"), row.names = FALSE)
+
+# Calculate products wholesale price by year
+product_revenue <- wc_pp %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+# Plot product wholesale by year
+plot_ly(product_revenue, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Product Wholesale Sum",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+
+
+## Top Products
+
+
+
+```{r}
+products_top_90 <- product_revenue %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9) %>% 
+  pull(product_general) %>% 
+  unique()
+
+top_90 <- product_revenue %>% 
+  filter(product_general %in% products_top_90)
+
+plot_ly(top_90, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Products in top 90% of Wholesale",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+```
+
+
+
+# Products vs Employment
+
+
+
+```{r}
+top_90$date <- as.Date(paste0(top_90$year, "-01-01"))
+
+products_date <- ggplot(top_90, aes(x = date, y = wholesale, group = product_general, color = product_general)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = pals::stepped()) +
+    scale_x_date(date_breaks = "10 year", 
+               date_labels = "%Y", 
+               limits = c(as.Date("1969-01-01"), as.Date("2022-12-31")), 
+               expand = c(0,0)) +
+  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
+  ggtitle("Yearly Wholesale Sum by Product") +
+  xlab("Year") +
+  ylab("Wholesale") +
+  labs(color = "Product") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+state_avg_emp_1969 / products_date
+```
+
+```{r}
+# Looking at inland processors
+wc_morgan_hill <- wc_emp %>% 
+  filter(plant_zip == 95037)
+
+wc_yuba <- wc_emp %>% 
+  filter(plant_zip == 95991)
+
+na_port <- pp_address %>% 
+  filter(pp_idnum %in% c(6061296, 4130602))
+```
+

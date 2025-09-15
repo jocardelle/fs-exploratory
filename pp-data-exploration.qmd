@@ -2,7 +2,7 @@
 title: "Processed Products Exploratory Analysis"
 author: "Josephine Cardelle"
 format: html
-editor: visual
+editor: source
 editor_options: 
   chunk_output_type: console
 ---
@@ -28,14 +28,52 @@ library(patchwork)
 library(stringr)
 library(plotly)
 library(scales)
+library(pals)
+library(paletteer)
+library(tigris)
+library(snakecase)
 ```
 
 ## Load data
 
 ```{r}
-pp_emp <- read_excel(here("data/processed_products/westcoast_pp_employment.xlsx"))
-pp <- read_excel(here("data/processed_products/westcoast_pps.xlsx"))
-pp_address <- read_excel(here("data/processed_products/pp_address_23.xlsx"))
+pp_emp <- read_excel(here("data/processed_products/westcoast_pp_employment.xlsx")) %>% 
+  clean_names()
+
+pp_address <- read_excel(here("data/processed_products/pp_address_23.xlsx")) %>% 
+  clean_names()
+
+pp_processed <- read_csv(here("data/processed_products/pp_processed.csv")) %>% 
+  clean_names()
+
+pp_names <- read_csv(here("data/processed_products/pp_names.csv")) %>% 
+  clean_names()
+
+# PROCESSOR PORT INFORMATION - USE TO GET SUBREGIONS
+pp_ports <- read_csv(here("data/processed_products/processor_port.csv"))
+```
+
+```{r}
+pp_ports$io_pac_port_group <- to_snake_case(pp_ports$io_pac_port_group)
+
+pp_ports <- pp_ports %>%
+  mutate(
+    region = case_when(
+      io_pac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
+      io_pac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
+      io_pac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
+      io_pac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
+      io_pac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
+    )
+  )
+
+pp_product_codes <- pp_names %>% 
+  select(pp_code, pp_dscp) %>% 
+  distinct()
+
+pp <- left_join(pp_processed, pp_product_codes, by = "pp_code")
+
+
 ```
 
 # Data Exploration
@@ -59,7 +97,6 @@ pp_address <- pp_address %>%
 
 # Check if any of the id number columns have leading zeros
 sum(startsWith(pp_emp$pp_idnum, "0"))
-sum(startsWith(pp$pp_idnum, "0"))
 sum(startsWith(pp_address$pp_idnum, "0"))
 
 # No leading zeros, change id and year column to numeric
@@ -82,7 +119,7 @@ print(unique(pp_emp$year))
 print(unique(pp$year))
 ```
 
-The products data has significantly fewer processors included than the employment and address data. The employment data is missing about 400 processors included the address data. The employment data dates 1970-2022 while the products data dates 2011-2022. This could account the large discrepancy in number of processors. The products data also seems to be filtered to WC while the employment data may include all states.
+The products data has significantly fewer processors included than the employment and address data.
 
 ```{r}
 # Change month to a column
@@ -104,20 +141,29 @@ pp_employment <- pp_employment %>%
 # pp_states <- pp_address %>% 
 #   select(pp_idnum, plant_state_abrv)
 
-emp_states <- left_join(pp_employment, pp_address, by = "pp_idnum")
+emp_states <- left_join(pp_employment, pp_ports, by = "pp_idnum")
 
 # Check rows with na plant_state
 emp_states_na <- emp_states %>% 
-  filter(is.na(plant_state_abrv))
+  filter(is.na(state_abrv))
+
+print(n_distinct(emp_states_na$pp_idnum))
 
 # Some of these have "at sea processor" under plant city.. keep those for now?
 # Filter to west coast or at sea processor that has NA 
 wc_emp <- emp_states %>% 
-  filter(plant_state_abrv %in% c("OR", "WA", "CA") | (plant_city == "AT SEA PROCESSOR" & (is.na(plant_state_abrv))))
+  filter(plant_state_abrv %in% c("OR", "WA", "CA") | 
+           (plant_city == "AT SEA PROCESSOR" & 
+              (is.na(plant_state_abrv))) |
+           (state_abrv %in% c("OR", "WA", "CA") &
+              (is.na(plant_state_abrv))))
+
+write.csv(wc_emp, file = here("data/processed_products/pp_wc.csv"), row.names = FALSE)
 
 # Check number of processors compared to the products dataset
 print(n_distinct(wc_emp$pp_idnum))
 print(n_distinct(pp$pp_idnum))
+print(n_distinct(pp_employment$pp_idnum))
 
 # Still a big discrepency, check after 2011
 wc_emp_2011 <- wc_emp %>%
@@ -139,7 +185,10 @@ monthly_avg <- wc_emp %>%
 
 
 # Or monthly average by year?
-
+monthly_avg <- pp_ports %>% 
+  group_by(region, year, month) %>% 
+  summarize(avg_emp = mean(employees, na.rm = TRUE)) %>% 
+  mutate(date = make_date(year, month, 1))
 
 ```
 
@@ -221,8 +270,9 @@ wc_address_city <- wc_emp %>%
 
 ```{r}
 # Read in data with coordinates
-processor_coords <- read_csv(here("data/processed_products/pp_coordinates.csv"))
-processor_city_coords <- read_csv(here("data/processed_products/pp_coordinates_city.csv"))
+#processor_coords <- read_csv(here("data/processed_products/pp_coordinates.csv"))
+#processor_city_coords <- read_csv(here("data/processed_products/pp_coordinates_city.csv"))
+
 processor_zip_coords <- read_csv(here("data/processed_products/pp_coordinates_zip.csv"))
 ```
 
@@ -230,8 +280,8 @@ processor_zip_coords <- read_csv(here("data/processed_products/pp_coordinates_zi
 
 ```{r}
 # Get average employees by city
-avg_emp_city <- processor_zip_coords %>% 
-  group_by(longitude, latitude, plant_city, plant_zip) %>% 
+avg_emp_city <- pp_ports %>% 
+  group_by(longitude, latitude, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE))
 
 # Convert to sf
@@ -244,7 +294,7 @@ tmap_mode("view")
 avg_emp_map <- tm_shape(wc_avg_coords, id = "city") +
   tm_bubbles(size = "avg_employees",
              fill = "avg_employees",
-             fill.scale = tm_scale_continuous(values = "plasma"),
+             palette = colorRampPalette(ggthemes::Color_Blind)(100),
              size.legend = tm_legend_hide(),
              fill.legend = tm_legend(title = "Average Employees")) +
   tm_borders() +
@@ -260,18 +310,26 @@ avg_emp_map
 ```
 
 # Yearly Revenue by State
+
 ```{r}
+pp <- left_join(pp, pp_address, by = "pp_idnum")
+
 wc_pp <- pp %>% 
-  filter(state %in% c("OR", "WA", "CA"))
+    filter(plant_state_abrv %in% c("OR", "WA", "CA") | 
+           (plant_city == "AT SEA PROCESSOR" & 
+              (is.na(plant_state_abrv))) |
+           (state_abrv %in% c("OR", "WA", "CA") &
+              (is.na(plant_state_abrv))))
+
 
 state_revenue <- wc_pp %>% 
-  group_by(year, state) %>% 
+  group_by(year, plant_state_abrv) %>% 
   summarise(wholesale = (sum(dollars, na.rm = TRUE))/10000000)
 
-revenue <- ggplot(state_revenue, aes(x = year, y = wholesale, group = state, color = state)) +
+revenue <- ggplot(state_revenue, aes(x = year, y = wholesale, group = plant_state_abrv, color = plant_state_abrv)) +
   geom_line(linewidth = 1) +
   scale_color_viridis_d() +
-  scale_x_continuous(breaks = seq(2011, 2022, by = 1)) +
+  scale_x_continuous(breaks = seq(1969, 2022, by = 10)) +
   ggtitle("Yearly wholesale sum by state") +
   xlab("Year") +
   ylab("Wholesale ($10M)") +
@@ -283,15 +341,16 @@ revenue
 ```
 
 # Revenue and Employment
+
 ```{r}
 state_revenue$date <- as.Date(paste0(state_revenue$year, "-01-01"))
 
-revenue_date <- ggplot(state_revenue, aes(x = date, y = wholesale, group = state, color = state)) +
+revenue_date <- ggplot(state_revenue, aes(x = date, y = wholesale, group = plant_state_abrv, color = plant_state_abrv)) +
   geom_line(linewidth = 1) +
   scale_color_viridis_d() +
-    scale_x_date(date_breaks = "1 year", 
+    scale_x_date(date_breaks = "10 years", 
                date_labels = "%Y", 
-               limits = c(as.Date("2011-01-01"), as.Date("2022-12-31")), 
+               limits = c(as.Date("1969-01-01"), as.Date("2022-12-31")), 
                expand = c(0,0)) +
   ggtitle("Yearly Wholesale Sum by State") +
   xlab("Year") +
@@ -302,12 +361,12 @@ revenue_date <- ggplot(state_revenue, aes(x = date, y = wholesale, group = state
 
 revenue_date
 
-state_avg_emp_2011 <- ggplot(monthly_avg, aes(x = date, y = avg_emp, group = plant_state_abrv, color = plant_state_abrv)) +
+state_avg_emp_1969 <- ggplot(monthly_avg, aes(x = date, y = avg_emp, group = plant_state_abrv, color = plant_state_abrv)) +
   geom_line(linewidth = 1) +
   scale_color_viridis_d() +
-  scale_x_date(date_breaks = "1 year", 
+  scale_x_date(date_breaks = "10 years", 
                date_labels = "%Y", 
-               limits = c(as.Date("2011-01-01"), as.Date("2022-12-31")), 
+               limits = c(as.Date("1969-01-01"), as.Date("2022-12-31")), 
                expand = c(0,0)) +
   ggtitle("Average Monthly Processor Employee Count") +
   xlab("Year") +
@@ -316,13 +375,18 @@ state_avg_emp_2011 <- ggplot(monthly_avg, aes(x = date, y = avg_emp, group = pla
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))
 
-state_avg_emp_2011 / revenue_date
+state_avg_emp_1969 / revenue_date
 ```
 
 # Products
+
 ## Wholesale
+
 ```{r}
 # Create list of generalized products
+wc_pp <- wc_pp %>% 
+  rename(product = pp_dscp)
+
 general_products <- c(
   "SALMON" = "SALMON",
   "TUNA" = "TUNA",
@@ -356,7 +420,7 @@ general_products <- c(
   "MUSSEL" = "MUSSELS",
   "SKATE" = "SKATES",
   "LOBSTER" = "LOBSTER",
-  "DOLPHIN" = "DOLPHIN",
+  "DOLPHIN" = "DORADO",
   "OPAH" = "OPAH",
   "ANGLER" = "ANGLER",
   "ROUGHY" = "ORANGE ROUGHY",
@@ -383,6 +447,7 @@ wc_pp <- wc_pp %>%
     }
   }))
 
+write.csv(wc_pp, file = here("data/processed_products/products_general.csv"), row.names = FALSE)
 
 # Calculate products wholesale price by year
 product_revenue <- wc_pp %>% 
@@ -404,6 +469,7 @@ plot_ly(product_revenue, x = ~year, y = ~wholesale,
 ```
 
 ## Top Products
+
 ```{r}
 products_top_90 <- product_revenue %>% 
   group_by(year) %>% 
@@ -428,34 +494,37 @@ plot_ly(top_90, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 ```
 
-
 # Products vs Employment
+
 ```{r}
 top_90$date <- as.Date(paste0(top_90$year, "-01-01"))
 
 products_date <- ggplot(top_90, aes(x = date, y = wholesale, group = product_general, color = product_general)) +
   geom_line(linewidth = 1) +
- # scale_color_viridis_d() +
-    scale_x_date(date_breaks = "1 year", 
+  scale_color_manual(values = pals::stepped()) +
+    scale_x_date(date_breaks = "10 year", 
                date_labels = "%Y", 
-               limits = c(as.Date("2011-01-01"), as.Date("2022-12-31")), 
+               limits = c(as.Date("1969-01-01"), as.Date("2022-12-31")), 
                expand = c(0,0)) +
   scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
   ggtitle("Yearly Wholesale Sum by Product") +
   xlab("Year") +
   ylab("Wholesale") +
-  labs(color = "State") +
+  labs(color = "Product") +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))
 
-state_avg_emp_2011 / products_date
+state_avg_emp_1969 / products_date
 ```
 
 ```{r}
+# Looking at inland processors
 wc_morgan_hill <- wc_emp %>% 
   filter(plant_zip == 95037)
 
 wc_yuba <- wc_emp %>% 
   filter(plant_zip == 95991)
-```
 
+na_port <- pp_address %>% 
+  filter(pp_idnum %in% c(6061296, 4130602))
+```

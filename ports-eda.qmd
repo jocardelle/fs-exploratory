@@ -1,0 +1,843 @@
+---
+title: "Ports Exploratory Analysis"
+author: "Josephine Cardelle"
+execute: 
+  warning: false
+  message: false
+format:
+  html:
+    code-fold: true
+    code-summary: "Show the code"
+    toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(here)
+library(dplyr)
+library(janitor)
+library(ggplot2)
+library(forcats)
+library(paletteer)
+library(scales)
+library(plotly)
+library(snakecase)
+```
+
+## Read in data
+
+```{r}
+products <- read_csv(here("data/processed_products/products_general.csv"))
+
+processor_port_emp <- read_csv(here("data/processed_products/processor_port.csv"))
+  
+port_location <- c("north_wa_coast", "puget_sound", "south_and_central_wa_coast", "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings", "crescent_city", "eureka", "fort_bragg", "bodega_bay", "san_francisco", "monterey", "morro_bay", "santa_barbara", "los_angeles", "san_diego", "other")
+
+region_location <- c("WA", "OR", "Northern CA", "Central CA", "Southern CA")
+
+```
+
+# Species at Ports
+
+```{r}
+# Convert port group to snake case
+processor_port_emp$io_pac_port_group <- to_snake_case(processor_port_emp$io_pac_port_group)
+
+# Select unique ports and id numbers
+ports <- processor_port_emp %>% 
+  select(pp_idnum, io_pac_port_group) %>% 
+  distinct()
+
+# Join products and port information
+product_ports <- left_join(products, ports, by = "pp_idnum")
+#write.csv(product_ports, file = (here("data/processed_products/port_products.csv")))
+
+# Assign Region
+product_ports <- product_ports %>%
+  mutate(
+    region = case_when(
+      io_pac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
+      io_pac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
+      io_pac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
+      io_pac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
+      io_pac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
+    )
+  )
+# Sum revenue by port and product
+port_product_revenue <- product_ports %>% 
+  group_by(io_pac_port_group, region, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  ungroup()
+
+# Order by location  
+port_product_revenue$region <- factor(port_product_revenue$region, levels = region_location)
+
+# Stacked bar chart
+# ggplot(port_product_revenue, aes(fill = product_general, y = region, x = wholesale)) +
+#   geom_bar(position = "stack", stat = "identity")
+```
+
+# Top 90% of revenue in a port
+
+```{r}
+top90_products <- port_product_revenue %>%
+  group_by(region) %>%
+  arrange(desc(wholesale), .by_group = TRUE) %>%
+  mutate(cum_rev = cumsum(wholesale),
+         tot_rev = sum(wholesale),
+         cum_prop = cum_rev / tot_rev) %>%
+  filter(cum_prop <= 0.90 | row_number() == 1) %>% # keep all products that together make up at least 90% of revenue
+  ungroup()
+
+ggplot(top90_products, aes(fill = product_general,
+                           y = region,
+                           x = wholesale)) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_x_continuous(labels = label_dollar(scale = 1e-9, suffix = "B")) +
+  scale_y_discrete(limits = rev(levels(top90_products$region))) +
+  scale_fill_viridis_d() +
+  labs(title = "Top 90% of Processor Product Revenue (1963-2023)",
+       x = "Wholesale Revenue",
+       y = " Processor Port")
+```
+
+```{r}
+ggplot(top90_products, aes(fill = product_general,
+                           y = region,
+                           x = wholesale)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_discrete(limits = rev(levels(top90_products$region))) +
+  scale_fill_viridis_d() +
+  labs(title = "Top 90% of Processor Product Revenue by Port (2011-2022)",
+       x = "Wholesale Revenue",
+       y = "Processor Port",
+       fill = "Product Species")
+```
+
+## Interactive versions
+
+```{r}
+bar_port <- plot_ly(
+  data = top90_products,
+  x = ~wholesale,
+  y = ~region,
+  color = ~product_general,
+  type = "bar",
+  orientation = "h",
+  colors = "viridis") %>%
+  layout(
+    barmode = "stack",
+    xaxis = list(title = "Wholesale Revenue"),
+    yaxis = list(title = "Processor Region", autorange = "reversed")
+  )
+
+bar_port
+
+# Percent share per port
+top90_products_percent <- top90_products %>%
+  group_by(region) %>%
+  mutate(share = wholesale / sum(wholesale)) %>%
+  ungroup()
+
+#write.csv(top90_products_percent, file = (here("data/processed_products/port_products_revenue.csv")), row.names = FALSE)
+# Order ports by location
+top90_products_percent$region <- factor(
+  top90_products_percent$region,
+  levels = region_location
+)
+
+# Interactive percent bar chart
+bar_percent <- plot_ly(
+  data = top90_products_percent,
+  x = ~share,
+  y = ~region,
+  color = ~product_general,
+  type = "bar",
+  orientation = "h",
+  colors = "inferno",
+  text = ~paste0(product_general, ": ", percent(share))
+) %>%
+  layout(
+    barmode = "stack",
+    xaxis = list(title = "Share of Wholesale Revenue", tickformat = ".0%"),
+    yaxis = list(title = "Processor Port", autorange = "reversed")
+  )
+
+bar_percent
+```
+
+# Employment per port
+
+```{r, fig.width=14, fig.height=10}
+# Find monthly average employment for each state
+monthly_emp_port <- processor_port_emp %>% 
+  group_by(io_pac_port_group, year, month) %>% 
+  summarize(avg_emp = mean(employees, na.rm = TRUE)) %>% 
+  mutate(date = make_date(year, month, 1))
+
+monthly_emp_port$io_pac_port_group <- factor(monthly_emp_port$io_pac_port_group, levels = port_location)
+
+# Plot average monthly employee count over time by state
+ggplot(monthly_emp_port, aes(x = date, y = avg_emp, group = io_pac_port_group, color = io_pac_port_group)) +
+  geom_line(linewidth = 1) +
+  scale_color_viridis_d() +
+  scale_x_date(date_breaks = "10 years", 
+               date_labels = "%Y", 
+               limits = c(as.Date("1970-01-01"), NA), 
+               expand = c(0,0)) +
+  ggtitle("Average Monthly Processor Employee Count") +
+  xlab("Year") +
+  ylab("Number of Employees") +
+  labs(color = "Port") +
+  theme_minimal() +
+  facet_wrap(~ io_pac_port_group) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+# Individual Port Species
+
+## North WA Coast
+
+```{r}
+northwa_products <- product_ports %>% 
+  filter(io_pac_port_group == "north_wa_coast") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+northwa_top_90 <- northwa_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+northwa_top_products <- northwa_products %>% 
+  filter(product_general %in% northwa_top_90)
+
+plot_ly(northwa_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "North WA Coast Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## Puget Sound
+
+```{r}
+puget_products <- product_ports %>% 
+  filter(io_pac_port_group == "puget_sound") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+puget_top_90 <- puget_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+puget_top_products <- puget_products %>% 
+  filter(product_general %in% puget_top_90)
+
+plot_ly(puget_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Puget Sound Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## South and Central WA Coast
+
+```{r}
+southcenwa_products <- product_ports %>% 
+  filter(io_pac_port_group == "south_and_central_wa_coast") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+southcenwa_top_90 <- southcenwa_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+southcenwa_top_products <- southcenwa_products %>% 
+  filter(product_general %in% southcenwa_top_90)
+
+plot_ly(southcenwa_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "South and Central WA Coast Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## Astoria
+
+```{r}
+astoria_products <- product_ports %>% 
+  filter(io_pac_port_group == "astoria") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+astoria_top_90 <- astoria_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+astoria_top_products <- astoria_products %>% 
+  filter(product_general %in% astoria_top_90)
+
+plot_ly(astoria_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Astoria Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## Newport
+
+```{r}
+newport_products <- product_ports %>% 
+  filter(io_pac_port_group == "newport") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+newport_top_90 <- newport_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+newport_top_products <- newport_products %>% 
+  filter(product_general %in% newport_top_90)
+
+plot_ly(newport_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Newport Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## Coos Bay
+
+```{r}
+coos_products <- product_ports %>% 
+  filter(io_pac_port_group == "coos_bay") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+coos_top_90 <- coos_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+coos_top_products <- coos_products %>% 
+  filter(product_general %in% coos_top_90)
+
+plot_ly(coos_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Coos Bay Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## Brookings
+
+```{r}
+brookings_products <- product_ports %>% 
+  filter(io_pac_port_group == "brookings") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+brookings_top_90 <- brookings_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+brookings_top_products <- brookings_products %>% 
+  filter(product_general %in% brookings_top_90)
+
+plot_ly(brookings_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Brookings Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+
+```
+
+## Crescent City
+
+```{r}
+crescent_products <- product_ports %>% 
+  filter(io_pac_port_group == "crescent_city") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+crescent_top_90 <- crescent_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+crescent_top_products <- crescent_products %>% 
+  filter(product_general %in% crescent_top_90)
+
+plot_ly(crescent_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Crescent City Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Eureka
+
+```{r}
+eureka_products <- product_ports %>% 
+  filter(io_pac_port_group == "eureka") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+eureka_top_90 <- eureka_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+eureka_top_products <- eureka_products %>% 
+  filter(product_general %in% eureka_top_90)
+
+plot_ly(eureka_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Eureka Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Fort Bragg
+
+```{r}
+bragg_products <- product_ports %>% 
+  filter(io_pac_port_group == "fort_bragg") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+bragg_top_90 <- bragg_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+bragg_top_products <- bragg_products %>% 
+  filter(product_general %in% bragg_top_90)
+
+plot_ly(bragg_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Fort Bragg Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Bodega Bay
+
+```{r}
+bodega_products <- product_ports %>% 
+  filter(io_pac_port_group == "bodega_bay") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+bodega_top_90 <- bodega_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+bodega_top_products <- bodega_products %>% 
+  filter(product_general %in% bodega_top_90)
+
+plot_ly(bodega_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Bodega Bay Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+
+## San Francisco
+```{r}
+sf_products <- product_ports %>% 
+  filter(io_pac_port_group == "san_francisco") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+sf_top_90 <- sf_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+sf_top_products <- sf_products %>% 
+  filter(product_general %in% sf_top_90)
+
+plot_ly(sf_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "San Francisco Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Monterey
+```{r}
+monterey_products <- product_ports %>% 
+  filter(io_pac_port_group == "monterey") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+monterey_top_90 <- monterey_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+monterey_top_products <- monterey_products %>% 
+  filter(product_general %in% monterey_top_90)
+
+plot_ly(monterey_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Monterey Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+
+## Morro Bay
+```{r}
+mb_products <- product_ports %>% 
+  filter(io_pac_port_group == "morro_bay") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+mb_top_90 <- mb_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+mb_top_products <- mb_products %>% 
+  filter(product_general %in% mb_top_90)
+
+plot_ly(mb_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Morro Bay Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Santa Barbara
+```{r}
+sb_products <- product_ports %>% 
+  filter(io_pac_port_group == "santa_barbara") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+sb_top_90 <- sb_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+sb_top_products <- sb_products %>% 
+  filter(product_general %in% sb_top_90)
+
+plot_ly(sb_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Santa Barbara Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Los Angeles
+```{r}
+la_products <- product_ports %>% 
+  filter(io_pac_port_group == "los_angeles") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+la_top_90 <- la_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+la_top_products <- la_products %>% 
+  filter(product_general %in% la_top_90)
+
+plot_ly(la_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Los Angeles Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## San Diego
+```{r}
+sd_products <- product_ports %>% 
+  filter(io_pac_port_group == "san_diego") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+sd_top_90 <- sd_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+sd_top_products <- sd_products %>% 
+  filter(product_general %in% sd_top_90)
+
+plot_ly(sd_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "San Diego Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+## Other
+```{r}
+other_products <- product_ports %>% 
+  filter(io_pac_port_group == "other") %>% 
+  group_by(year, product_general) %>% 
+  summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
+  arrange(product_general, year) %>% 
+  ungroup()
+
+other_top_90 <- other_products %>% 
+  group_by(year) %>% 
+  arrange(year, desc(wholesale)) %>% 
+  mutate(year_total = sum(wholesale, na.rm = TRUE),
+         share = wholesale / year_total,
+         cumshare = cumsum(share)) %>% 
+  filter(cumshare <= 0.9 | row_number() == 1) %>% 
+  pull(product_general) %>% 
+  unique()
+
+other_top_products <- other_products %>% 
+  filter(product_general %in% other_top_90)
+
+plot_ly(other_top_products, x = ~year, y = ~wholesale, 
+        color = ~product_general, 
+        type = 'scatter', 
+        mode = 'lines+markers', 
+        group = ~product_general) %>% 
+  layout(title = "Others Locations Products in top 90% of Revenue",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Wholesale Price"))
+ 
+```
+
+
+
+
+# Sardine
+```{r}
+
+sardine <- product_ports %>% 
+  filter(product_general == "SARDINE") %>% 
+  group_by(region, year) %>% 
+  summarise(poundage = sum(pounds),
+            revenue = sum(dollars))
+
+sardine$region <- factor(sardine$region, levels = region_location)
+
+ggplot(sardine, aes(x = year, y = poundage, colour = region)) +
+  geom_line(size = 1) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = " M")) +
+  scale_color_viridis_d() +
+  theme_minimal()
+
+ggplot(sardine, aes(x = year, y = revenue, colour = region)) +
+  geom_line(size = 1) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = " M")) +
+  scale_color_viridis_d() +
+  labs(title = "Yearly Processor Revenue from Sardine") +
+  theme_minimal()
+```
+
+
+
