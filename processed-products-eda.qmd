@@ -1,5 +1,5 @@
 ---
-title: "pp-eda-cleaned"
+title: "Processed Products EDA"
 format: html
 editor_options: 
   chunk_output_type: console
@@ -12,71 +12,35 @@ library(tidyverse)
 library(here)
 library(dplyr)
 library(ggplot2)
-library(readxl)
-library(janitor)
-library(lubridate)
-library(tidygeocoder)
-library(sf)
-library(tmap)
-library(patchwork)
-library(stringr)
-library(plotly)
-library(scales)
-library(pals)
 library(paletteer)
-library(snakecase)
+library(scales)
+library(sf)
 library(tigris)
-library(ggthemes)
+library(tmap)
+library(plotly)
+library(viridisLite)
 ```
 
 ## Load data
 
 ```{r}
 # Processors product data
-pp_processed <- read_csv(here("data/processed_products/pp_processed.csv")) %>% 
-  clean_names()
+pp_processed <- read_csv(here("data/processed_products/cleaned/wc_products_location.csv"))
 
+# Processor location data
+pp_location <- read_csv(here("data/processed_products/cleaned/wc_pp_address.csv"))
 
-# Product code and description
-pp_names <- read_csv(here("data/processed_products/pp_names.csv")) %>% 
-  clean_names()
-
-# Processor address and port data (including longitude and latitude)
-pp_ports <- read_csv(here("data/processed_products/processor_port.csv"))
+# Processor employment data
+pp_employment <- read_csv(here("data/processed_products/cleaned/wc_employment_location.csv"))
 
 # Location for ordering
 region_location <- c("WA", "OR", "Northern CA", "Central CA", "Southern CA")
 ```
 
-
-```{r}
-# Add region to processor locations
-pp_ports$io_pac_port_group <- to_snake_case(pp_ports$io_pac_port_group)
-
-pp_ports <- pp_ports %>%
-  mutate(
-    region = case_when(
-      io_pac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
-      io_pac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
-      io_pac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
-      io_pac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
-      io_pac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
-    )
-  )
-
-# Combine processor product info with product description
-pp_product_codes <- pp_names %>% 
-  select(pp_code, pp_dscp) %>% 
-  distinct()
-
-pp <- left_join(pp_processed, pp_product_codes, by = "pp_code")
-
-```
-
 # Employment
 ```{r}
 # Get processor monthly avg employee count
-monthly_avg <- pp_ports %>% 
+monthly_avg <- pp_employment %>% 
   group_by(region, year, month) %>% 
   summarize(avg_emp = mean(employees, na.rm = TRUE)) %>% 
   mutate(date = make_date(year, month, 1))
@@ -104,7 +68,7 @@ state_avg_emp
 
 # Employment Map
 ```{r}
-avg_emp_city <- pp_ports %>% 
+avg_emp_city <- pp_employment %>% 
   group_by(longitude, latitude, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE))
 
@@ -135,7 +99,7 @@ avg_emp_map <-
   tm_shape(states) +
     tm_polygons(fill = NA, border.col = "gray70") +
   tm_shape(roads_region) +
-    tm_lines(col = "black", lwd = 0.5, col_alpha = 0.6) +   # v4 syntax
+    tm_lines(col = "black", lwd = 0.5, col_alpha = 0.6) +   
   tm_shape(wc_avg_coords, id = "plant_city") +
     tm_bubbles(
       size = "avg_employees",
@@ -154,27 +118,100 @@ avg_emp_map <-
 avg_emp_map
 ```
 
-# Yearly Revenue by Region
-
+# Employment map by decades
 ```{r}
-processors <- pp_ports %>% 
-  select(pp_idnum, company, plant_state_abrv, full_address, longitude, latitude, io_pac_port_group, region) %>% 
-  distinct()
+# 1970-1979
+avg_emp_city_70 <- pp_employment %>% 
+  filter(year <= 1979) %>% 
+  group_by(longitude, latitude, plant_city) %>% 
+  summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
+  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = 4326)
 
-product_location <- left_join(pp, processors, by = "pp_idnum")
+# 1980-1989
+avg_emp_city_80 <- pp_employment %>% 
+  filter(year >= 1980 & year <= 1989) %>% 
+  group_by(longitude, latitude, plant_city) %>% 
+  summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
+  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = 4326)
 
-product_location <- product_location %>% 
-  filter(!is.na(plant_state_abrv))
+# 1990-1999
+avg_emp_city_90 <- pp_employment %>% 
+  filter(year >= 1990 & year <= 1999) %>% 
+  group_by(longitude, latitude, plant_city) %>% 
+  summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
+  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = 4326)
+
+# 2000-2009
+avg_emp_city_00 <- pp_employment %>% 
+  filter(year >= 2000 & year <= 2009) %>% 
+  group_by(longitude, latitude, plant_city) %>% 
+  summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
+  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = 4326)
+
+# 2010-2019
+avg_emp_city_10 <- pp_employment %>% 
+  filter(year >= 2010 & year <= 2019) %>% 
+  group_by(longitude, latitude, plant_city) %>% 
+  summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
+  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = 4326)
+
+# Combine
+avg_emp_city_10$decade <- "2010–2019"
+avg_emp_city_00$decade <- "2000–2009"
+avg_emp_city_90$decade <- "1990–1999"
+avg_emp_city_80$decade <- "1980–1989"
+avg_emp_city_70$decade <- "1970–1979"
+
+all_emp <- rbind(avg_emp_city_10, avg_emp_city_00, avg_emp_city_90, avg_emp_city_80, avg_emp_city_70)
+
+# Filter to correct coordinates
+all_emp <- all_emp %>%
+  filter(st_coordinates(geometry)[,1] >= -125 &
+                st_coordinates(geometry)[,1] <= -115 &
+                st_coordinates(geometry)[,2] >= 32 &
+                st_coordinates(geometry)[,2] <= 50)
+
+# Plot all faceted by decade
+ggplot() +
+  geom_sf(data = states, fill = NA, color = "gray70") +
+  geom_sf(data = roads_region, color = "black", linewidth = 0.3, alpha = 0.6) +
+  geom_sf(
+    data = all_emp,
+    aes(size = avg_employees, fill = avg_employees),
+    shape = 21, color = "black", alpha = 0.8
+  ) +
+  scale_fill_viridis_c(option = "plasma", name = "Average Employees") +
+  facet_wrap(~decade, nrow = 1) +
+  theme_minimal() +
+  labs(title = "Processor Employment Across Decades") +
+    theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank()) +
+  guides(size = "none")
+```
 
 
-state_revenue <- product_location %>% 
+
+# Yearly Revenue by Region
+```{r}
+region_revenue <- pp_processed %>% 
   filter(!is.na(region)) %>%
   group_by(year, region) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE), .groups = "drop")
 
-state_revenue$region <- factor(state_revenue$region, levels = region_location)
+region_revenue$region <- factor(region_revenue$region, levels = region_location)
 
-revenue <- ggplot(state_revenue, aes(x = year, y = wholesale, group = region, color = region)) +
+revenue <- ggplot(region_revenue, aes(x = year, y = wholesale, group = region, color = region)) +
   geom_line(linewidth = 1) +
   scale_color_paletteer_d("ggthemes::Color_Blind") +
   scale_x_continuous(breaks = seq(1970, 2022, by = 10)) +
@@ -192,72 +229,8 @@ revenue
 
 # Products
 ```{r}
-# Create generalized product column
-product_location <- product_location %>% 
-  rename(product = pp_dscp)
-
-general_products <- c(
-  "SALMON" = "SALMON",
-  "TUNA" = "TUNA",
-  "HAKE" = "HAKE",
-  "WAHOO" = "WAHOO",
-  "CRAB" = "CRAB",
-  "HALIBUT" = "HALIBUT",
-  "SABLEFISH" = "SABLEFISH",
-  "SQUID" = "SQUID",
-  "SHRIMP" = "SHRIMP",
-  "BONITO" = "TUNA",
-  "COD" = "COD",
-  "CUCUMBER" = "SEA CUCUMBER",
-  "FLOUNDER" = "FLOUNDER",
-  "POLLOCK" = "POLLOCK",
-  "PERCH" = "ROCKFISH",
-  "ROCKFISH" = "ROCKFISH",
-  "TROUT" = "TROUT",
-  "CLAM" = "CLAMS",
-  "OYSTER" = "OYSTERS",
-  "SWORD" = "SWORDFISH",
-  "DRUM" = "DRUM",
-  "TILAPIA" = "TILAPIA",
-  "BASS" = "BASS",
-  "GROUPER" = "GROUPER",
-  "MARLIN" = "MARLIN",
-  "ESCOLAR" = "ESCOLAR",
-  "OCTOPUS" = "OCTOPUS",
-  "BUFFALO" = "BUFFALOFISH",
-  "STURGEON" = "STURGEON",
-  "MUSSEL" = "MUSSELS",
-  "SKATE" = "SKATES",
-  "LOBSTER" = "LOBSTER",
-  "DOLPHIN" = "DORADO",
-  "OPAH" = "OPAH",
-  "ANGLER" = "ANGLER",
-  "ROUGHY" = "ORANGE ROUGHY",
-  "CRAW" = "CRAWFISH",
-  "SMELT" = "SMELT",
-  "JACK" = "JACK",
-  "SARDINE" = "SARDINE",
-  "SEAWEED" = "SEAWEED",
-  "HERRING" = "HERRING",
-  "MACKEREL" = "MACKEREL",
-  "SCALLOP" = "SCALLOPS"
-)
-
-# Loop through the generalized terms
-product_location <- product_location %>%
-  mutate(product_general = sapply(product, function(x) {
-    match <- names(general_products)[str_detect(x, names(general_products))]
-    if (length(match) > 0) {
-      general_products[match[1]]
-    } else if (str_detect(x, "UNCL")) { #UNCL to unclassified if didn't match others
-      "UNCLASSIFIED"
-    } else {
-      "OTHER" # Assign other if nothing else
-    }
-  }))
-
 # Calculate products wholesale price by year
-product_revenue <- product_location %>% 
+product_revenue <- pp_processed %>% 
   group_by(year, product_general) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
   arrange(product_general, year) %>% 
@@ -297,9 +270,9 @@ plot_ly(top_90, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 ```
 
-# Washington Products
+## Washington Products
 ```{r}
-wa_products <- product_location %>% 
+wa_products <- pp_processed %>% 
   filter(region == "WA") %>% 
   group_by(year, product_general) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
@@ -330,7 +303,7 @@ plot_ly(top_90_wa, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 
 # Now do the same but for poundage instead of revenue
-wa_products_lb <- product_location %>% 
+wa_products_lb <- pp_processed %>% 
   filter(region == "WA") %>% 
   group_by(year, product_general) %>% 
   summarise(weight = sum(pounds, na.rm = TRUE)) %>% 
@@ -365,9 +338,9 @@ plot_ly(top_90_wa_lb, x = ~year, y = ~weight,
 ```
 
 
-# Oregon Products
+## Oregon Products
 ```{r}
-or_products <- product_location %>% 
+or_products <- pp_processed %>% 
   filter(region == "OR") %>% 
   group_by(year, product_general) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
@@ -398,7 +371,7 @@ plot_ly(top_90_or, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 
 # Now do the same but for poundage instead of revenue
-or_products_lb <- product_location %>% 
+or_products_lb <- pp_processed %>% 
   filter(region == "OR") %>% 
   group_by(year, product_general) %>% 
   summarise(weight = sum(pounds, na.rm = TRUE)) %>% 
@@ -432,9 +405,9 @@ plot_ly(top_90_or_lb, x = ~year, y = ~weight,
          yaxis = list(title = "Pounds"))
 ```
 
-# Northern CA Products
+## Northern CA Products
 ```{r}
-nca_products <- product_location %>% 
+nca_products <- pp_processed %>% 
   filter(region == "Northern CA") %>% 
   group_by(year, product_general) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
@@ -465,7 +438,7 @@ plot_ly(top_90_nca, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 
 # Now do the same but for poundage instead of revenue
-nca_products_lb <- product_location %>% 
+nca_products_lb <- pp_processed %>% 
   filter(region == "Northern CA") %>% 
   group_by(year, product_general) %>% 
   summarise(weight = sum(pounds, na.rm = TRUE)) %>% 
@@ -499,9 +472,9 @@ plot_ly(top_90_nca_lb, x = ~year, y = ~weight,
          yaxis = list(title = "Pounds"))
 ```
 
-# Central CA Products
+## Central CA Products
 ```{r}
-cca_products <- product_location %>% 
+cca_products <- pp_processed %>% 
   filter(region == "Central CA") %>% 
   group_by(year, product_general) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
@@ -532,7 +505,7 @@ plot_ly(top_90_cca, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 
 # Now do the same but for poundage instead of revenue
-cca_products_lb <- product_location %>% 
+cca_products_lb <- pp_processed %>% 
   filter(region == "Central CA") %>% 
   group_by(year, product_general) %>% 
   summarise(weight = sum(pounds, na.rm = TRUE)) %>% 
@@ -566,9 +539,9 @@ plot_ly(top_90_cca_lb, x = ~year, y = ~weight,
          yaxis = list(title = "Pounds"))
 ```
 
-# Southern CA Products
+## Southern CA Products
 ```{r}
-sca_products <- product_location %>% 
+sca_products <- pp_processed %>% 
   filter(region == "Southern CA") %>% 
   group_by(year, product_general) %>% 
   summarise(wholesale = sum(dollars, na.rm = TRUE)) %>% 
@@ -599,7 +572,7 @@ plot_ly(top_90_sca, x = ~year, y = ~wholesale,
          yaxis = list(title = "Wholesale Price"))
 
 # Now do the same but for poundage instead of revenue
-sca_products_lb <- product_location %>% 
+sca_products_lb <- pp_processed %>% 
   filter(region == "Southern CA") %>% 
   group_by(year, product_general) %>% 
   summarise(weight = sum(pounds, na.rm = TRUE)) %>% 

@@ -1,5 +1,5 @@
 ---
-title: "Fish Ticket Processor EDA"
+title: "Fish Ticket - Processed Products Comparison EDA"
 format: html
 editor: visual
 editor_options: 
@@ -12,15 +12,13 @@ editor_options:
 # Load libraries
 library(tidyverse)
 library(here)
-library(readxl)
 library(janitor)
 library(dplyr)
 library(stringr)
-library(ggsankey)
 library(snakecase)
 library(ggbump)
 library(purrr)
-library(R)
+library(scales)
 library(paletteer)
 ```
 
@@ -29,7 +27,7 @@ library(paletteer)
 pacfin_dealers <- read_csv(here("data/pacfin/unique_dealers.csv")) %>% 
   clean_names()
 
-processors <- read_csv(here("data/processed_products/pp_wc.csv"))
+processors <- read_csv(here("data/processed_products/cleaned/wc_pp_address.csv"))
 
 fish_ports <- read_csv(here("data/pacfin/port_species.csv")) %>% 
   clean_names()
@@ -37,11 +35,8 @@ fish_ports <- read_csv(here("data/pacfin/port_species.csv")) %>%
 port_dealer <- read_csv(here("data/pacfin/port_species_dealer.csv")) %>% 
   clean_names()
 
-pp_port_products_rev <- read_csv(here("data/processed_products/port_products_revenue.csv"))
 
-pp_port_products <- read_csv(here("data/processed_products/port_products.csv"))
-
-port_location <- c("north_wa_coast", "puget_sound", "south_and_central_wa_coast", "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings", "crescent_city", "eureka", "fort_bragg", "bodega_bay", "san_francisco", "monterey", "morro_bay", "santa_barbara", "los_angeles", "san_diego", "other")
+pp_products <- read_csv(here("data/processed_products/cleaned/wc_products_location.csv"))
 ```
 
 # Compare
@@ -160,130 +155,7 @@ other_products <- port_dealer %>%
   filter(product_general == "OTHER")
 
 write.csv(port_dealer, file = here("data/pacfin/pacfin_products_general.csv"), row.names = FALSE)
-```
-
-# Top Products pacFIN vs Processed products NEED TO REDO WITH CORRECT YEARS
-
-```{r}
-# Sum revenue by port and product
-ft_port_product_revenue <- port_dealer %>% 
-  group_by(iopac_port_group, product_general) %>% 
-  summarise(tot_revenue = sum(revenue, na.rm = TRUE)) %>% 
-  ungroup()
-
-# Convert ports to snake case
-ft_port_product_revenue$iopac_port_group <- to_snake_case(ft_port_product_revenue$iopac_port_group)
-
-# Order ports by location  
-ft_port_product_revenue$iopac_port_group <- factor(ft_port_product_revenue$iopac_port_group, levels = port_location)
-
-
-ft_top90_products <- ft_port_product_revenue %>%
-  group_by(iopac_port_group) %>%
-  arrange(desc(tot_revenue), .by_group = TRUE) %>%
-  mutate(cum_rev = cumsum(tot_revenue),
-         port_tot_rev = sum(tot_revenue),
-         cum_prop = cum_rev / port_tot_rev) %>%
-  filter(cum_prop <= 0.90 | row_number() == 1) %>% # keep all products that together make up at least 90% of revenue
-  ungroup()
-
-# Percent share per port
-ft_top90_products_percent <- ft_top90_products %>%
-  group_by(iopac_port_group) %>%
-  mutate(share = tot_revenue / sum(tot_revenue)) %>%
-  ungroup()
-
-# Combine ft product share and pp product share
-ft_product_share <- ft_top90_products_percent %>% 
-  select(iopac_port_group, product_general, tot_revenue, share) %>% 
-  rename(ft_tot_revenue = tot_revenue) %>% 
-  rename(ft_share = share)
-
-
-pp_port_products_rev$io_pac_port_group <- to_snake_case(pp_port_products_rev$io_pac_port_group)
-
-pp_product_share <- pp_port_products_rev %>% 
-  select(io_pac_port_group, product_general, wholesale, share) %>% 
-  rename(iopac_port_group = io_pac_port_group) %>% 
-  rename(pp_tot_revenue = wholesale) %>% 
-  rename(pp_share = share)
-
-
-ft_pp_products <- full_join(ft_product_share, pp_product_share, by = c("iopac_port_group", "product_general"))
-
-ft_pp_products_long <- ft_pp_products %>%
-  pivot_longer(cols = c(ft_share, pp_share),
-               names_to = "share_type",
-               values_to = "share") %>%
-  group_by(iopac_port_group, share_type) %>%
-  mutate(rank = rank(-share, ties.method = "first")) %>%
-  ungroup()
-
-# Comparison with ft and processed products
-ggplot(ft_pp_products_long, aes(x = share_type, y = rank, 
-                    color = product_general, group = product_general)) +
-  geom_bump(size = 1.2, alpha = 0.7) +
-  geom_point(size = 2) +
-  # Add labels with product name + % at the ends
-  geom_text(
-    data = ft_pp_products_long %>% filter(share_type %in% c("ft_share", "pp_share")),
-    aes(label = paste0(product_general, " (", scales::percent(share, accuracy = 0.1), ")"),
-        hjust = ifelse(share_type == "ft_share", 1.1, -0.1)),
-    size = 3
-  ) +
-  scale_y_reverse() +
-  scale_x_discrete(labels = c("ft_share" = "Fish Tickets", "pp_share" = "Processors")) +
-  facet_wrap(~iopac_port_group, scales = "free_y") +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  labs(x = "", y = "Rank",
-       title = "Rank Change of Products by Share Type",
-       subtitle = "Fish Tickets vs. Processors")
-
-
-# Create function to make different plot for each port group
-plot_bump <- function(port) {
-  df_plot <- ft_pp_products_long %>% filter(iopac_port_group == port)
-
-  # if there are no rows, return NULL so ggsave skips it
-  if (nrow(df_plot) == 0) return(NULL)
-
-  df_labels <- df_plot %>%
-    filter(share_type %in% c("ft_share", "pp_share"), !is.na(share)) %>%
-    mutate(label_text = paste0(product_general, " (", scales::percent(share, accuracy = 0.1), ")"),
-           hjust_val = ifelse(share_type == "ft_share", 1.1, -0.1))
-
-  ggplot(df_plot, aes(x = share_type, y = rank, color = product_general, group = product_general)) +
-    geom_bump(size = 1.2, alpha = 0.7) +
-    geom_point(size = 2) +
-    geom_text(
-      data = df_labels,
-      aes(label = label_text, hjust = hjust_val),
-      size = 3
-    ) +
-    scale_y_reverse() +
-    scale_x_discrete(labels = c("ft_share" = "Fish Tickets", "pp_share" = "Processors")) +
-    theme_minimal() +
-    theme(legend.position = "none") +
-    labs(
-      x = "", y = "Rank",
-      title = paste("Product Revenue in", port, "(1969-2022)"),
-      subtitle = "Fish Tickets vs. Processors"
-    )
-}
-
-# save plots safely
-walk(unique(ft_pp_products_long$iopac_port_group), function(port) {
-  p <- plot_bump(port)
-  if (!is.null(p)) {
-    ggsave(
-      filename = file.path("plots", paste0("bump_", gsub("[^A-Za-z0-9]+", "_", port), ".png")),
-      plot = p,
-      width = 8, height = 6, dpi = 300
-    )
-  }
-})
-
+port_dealer <- read_csv(here("data/pacfin/pacfin_products_general.csv"))
 ```
 
 # Poundage Comparison
@@ -304,21 +176,11 @@ ft_port_products <- port_dealer %>%
   )
 
 # Filter to the same years as fish ticket data
-pp_port_products <- pp_port_products %>% 
+pp_products <- pp_products %>% 
   filter(1981 <= year)
-pp_port_products <- pp_port_products %>% 
+pp_products <- pp_products %>% 
   rename(iopac_port_group = io_pac_port_group)
 
-pp_port_products <- pp_port_products %>% 
-  mutate(
-    region = case_when(
-      iopac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
-      iopac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
-      iopac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
-      iopac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
-      iopac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
-    )
-  )
 
 # Select columns of interest and group by region and product
 ft_region_products <- ft_port_products %>% 
@@ -326,7 +188,7 @@ ft_region_products <- ft_port_products %>%
   summarise(ft_poundage = sum(landed_weight_lbs)) %>% 
   mutate(dataset = "Fish Tickets")
 
-pp_region_products <- pp_port_products %>% 
+pp_region_products <- pp_products %>% 
   group_by(region, product_general) %>% 
   summarise(pp_poundage = sum(pounds)) %>% 
   mutate(dataset = "Processed Products")
@@ -344,101 +206,19 @@ region_products <- region_products %>%
   ))
 ```
 
-# Washington Bump Chart
+# Bump charts function
 
 ```{r}
-# Filter to Washington
-wa_products <- region_products %>%
-  filter(region == "WA")
-
-# Rank
-wa_ranked <- wa_products %>%
-  group_by(dataset) %>%
-  mutate(rank = rank(-poundage, ties.method = "first")) %>%
-  ungroup()
-
-# Make Bump Chart
-ggplot(wa_ranked, aes(x = dataset, y = rank, group = product_general, color = product_general)) +
-  geom_bump(size = 1.2, smooth = 8) +
-  geom_point(size = 4) +
-  geom_text(aes(label = paste0(product_general, " (", scales::comma(round(poundage)), " lbs)")),
-            hjust = ifelse(wa_ranked$dataset == "Fish Tickets", 1.1, -0.1),
-            size = 3) +
-  scale_y_reverse(breaks = 1:max(wa_ranked$rank)) +
-  theme_minimal(base_size = 14) +
-  theme(legend.position = "none",
-        panel.grid.minor = element_blank()) +
-  labs(
-    title = "Product Rankings by Poundage in WA",
-    x = NULL,
-    y = "Rank"
-  )
-
-# --- Top 10 products by poundage in WA ---
-wa_top10 <- wa_products %>%
-  group_by(product_general) %>%
-  summarise(total_poundage = sum(poundage, na.rm = TRUE)) %>%
-  slice_max(order_by = total_poundage, n = 10) %>%
-  inner_join(wa_products, by = "product_general")
-
-# Rank within dataset
-wa_top10_ranked <- wa_top10 %>%
-  group_by(dataset) %>%
-  mutate(rank = rank(-poundage, ties.method = "first")) %>%
-  ungroup()
-
-# Plot
-ggplot(wa_top10_ranked, aes(x = dataset, y = rank, group = product_general, color = product_general)) +
-  geom_bump(size = 1.2, smooth = 8) +
-  geom_point(size = 4) +
-  geom_text(aes(label = paste0(product_general, " (", scales::comma(round(poundage)), " lbs)")),
-            hjust = ifelse(wa_top10_ranked$dataset == "Fish Tickets", 1.1, -0.1),
-            size = 3) +
-  scale_y_reverse(breaks = 1:max(wa_top10_ranked$rank)) +
-  theme_minimal(base_size = 14) +
-  theme(legend.position = "none") +
-  labs(title = "Top 10 Products by Poundage (WA)")
-
-# --- Top 90% products by cumulative poundage in WA ---
-wa_cum <- wa_products %>%
-  group_by(product_general) %>%
-  summarise(total_poundage = sum(poundage, na.rm = TRUE)) %>%
-  arrange(desc(total_poundage)) %>%
-  mutate(cumshare = cumsum(total_poundage) / sum(total_poundage)) %>%
-  filter(cumshare <= 0.9) %>%
-  inner_join(wa_products, by = "product_general")
-
-# Rank within dataset
-wa_cum_ranked <- wa_cum %>%
-  group_by(dataset) %>%
-  mutate(rank = rank(-poundage, ties.method = "first")) %>%
-  ungroup()
-
-# Plot
-ggplot(wa_cum_ranked, aes(x = dataset, y = rank, group = product_general, color = product_general)) +
-  geom_bump(size = 1.2, smooth = 8) +
-  geom_point(size = 4) +
-  geom_text(aes(label = paste0(product_general, " (", scales::comma(round(poundage)), " lbs)")),
-            hjust = ifelse(wa_cum_ranked$dataset == "Fish Tickets", 1.1, -0.1),
-            size = 3) +
-  scale_y_reverse(breaks = 1:max(wa_cum_ranked$rank)) +
-  theme_minimal(base_size = 14) +
-  theme(legend.position = "none") +
-  labs(title = "WA Products Contributing to Top 90% of Poundage (1981-2023)")
-```
-
-## Function to automate bump charts
-
-```{r}
+# Create function to compare fish ticket and processed products species poundage in a region (top 90% or top 10 products)
 region_product_bump_chart <- function(region_name, filter_type = c("top10", "top90")) {
   
   filter_type <- match.arg(filter_type)
   
-  # --- Step 1: Filter region ---
+  # Filter to a region
   region_data <- region_products %>%
     filter(region == region_name)
   
-  # --- Step 2: Apply filter ---
+  # Apply filter
   if (filter_type == "top10") {
     region_filtered <- region_data %>%
       group_by(product_general) %>%
@@ -460,13 +240,13 @@ region_product_bump_chart <- function(region_name, filter_type = c("top10", "top
     plot_title <- paste(region_name, " Products Contributing to Top 90% of Poundage (1981-2023)", sep = "")
   }
   
-  # --- Step 3: Rank within dataset ---
+  # Rank within fish ticket or processed products
   region_ranked <- region_filtered %>%
     group_by(dataset) %>%
     mutate(rank = rank(-poundage, ties.method = "first")) %>%
     ungroup()
   
-  # --- Step 4: Plot bump chart ---
+  # Plot bump chart
   ggplot(region_ranked, aes(x = dataset, y = rank, group = product_general, color = product_general)) +
     geom_bump(size = 1.2, smooth = 8) +
     geom_point(size = 4) +
@@ -500,3 +280,74 @@ region_product_bump_chart("Northern CA", filter_type = "top90")
 region_product_bump_chart("Central CA", filter_type = "top90")
 region_product_bump_chart("Southern CA", filter_type = "top90")
 ```
+
+
+# Sardine Exploration
+
+```{r}
+# Processed Products
+sardine <- pp_products %>% 
+  filter(product_general == "SARDINE") %>% 
+  group_by(region, year) %>% 
+  summarise(poundage = sum(pounds),
+            revenue = sum(dollars))
+
+sardine$region <- factor(sardine$region, levels = region_location)
+
+pp_sardine <- ggplot(sardine, aes(x = year, y = poundage, colour = region)) +
+  geom_line(size = 1.25) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = " M")) +
+  scale_color_viridis_d() +
+  labs(title = "Yearly Processed Pounds of Sardine") +
+  ylab("Pounds") +
+  xlim(1980, 2022) +
+  theme_minimal()
+
+ggplot(sardine, aes(x = year, y = revenue, colour = region)) +
+  geom_line(size = 1) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = " M")) +
+  scale_color_viridis_d() +
+  labs(title = "Yearly Processor Revenue from Sardine") +
+  theme_minimal()
+
+# Fish Ticket
+fish_ticket <- read_csv("data/pacfin/pacfin_products_general.csv")
+ft_sardine <- fish_ticket %>%
+  filter(product_general == "SARDINE")
+
+# Convert port group to snake case
+ft_sardine$iopac_port_group <- to_snake_case(ft_sardine$iopac_port_group)
+# Assign Region
+ft_sardine <- ft_sardine %>%
+  mutate(
+    region = case_when(
+      iopac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
+      iopac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
+      iopac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
+      iopac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
+      iopac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
+    )
+  )
+
+ft_sardine_pounds <- ft_sardine %>% 
+  group_by(region, pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs),
+            revenue = sum(revenue))
+
+ft_sardine_pounds$region <- factor(ft_sardine_pounds$region, levels = region_location)
+
+ft_sardine <- ggplot(ft_sardine_pounds, aes(x = pacfin_year, y = poundage, colour = region)) +
+  geom_line(size = 1.25) +
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = " M")) +
+  scale_color_viridis_d() +
+  labs(title = "Yearly Fish Ticket Pounds from Sardine") +
+  xlim(1980, 2022) +
+  ylab("Pounds") +
+  xlab("Year") +
+  theme_minimal()
+  
+ft_sardine
+```
+
+
+

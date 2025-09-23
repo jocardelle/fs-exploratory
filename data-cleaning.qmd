@@ -1,0 +1,231 @@
+---
+title: "data-cleaning"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+## Load libraries
+```{r}
+library(tidyverse)
+library(here)
+library(readxl)
+library(dplyr)
+library(janitor)
+library(snakecase)
+library(tidygeocoder)
+```
+
+## Source functions
+```{r}
+# County to port group crosswalk function
+source(here("functions/assign_county.R"))
+```
+
+## Read in data
+```{r}
+# Product information
+pp_processed <- read_csv(here("data/processed_products/original/pp_processed.csv")) %>% 
+  clean_names()
+
+# Product description and code
+product_names <- read_csv(here("data/processed_products/original/pp_names.csv")) %>% 
+  clean_names()
+
+# Processor address
+pp_address <- read_excel(here("data/processed_products/original/pp_address_23.xlsx")) %>% 
+  clean_names()
+
+# Processor employment
+pp_employment <- read_excel(here("data/processed_products/original/pp_employment.xlsx")) %>% 
+  clean_names()
+
+# County to iopac port group
+iopac_ports <- read.csv(here("data/location_info/ports_counties.csv")) %>% 
+  clean_names()
+```
+
+
+# Clean/Explore Data
+```{r}
+# Change port groups to lower snake case
+iopac_ports$io_pac_port_group <- to_snake_case(iopac_ports$io_pac_port_group)
+
+# Add region to iopac port groups
+iopac_ports <- iopac_ports %>%
+  mutate(
+    region = case_when(
+      io_pac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
+      io_pac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
+      io_pac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
+      io_pac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
+      io_pac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
+    )
+  )
+
+# Join product info and product names
+product_names <- product_names %>% 
+  select(pp_code, pp_dscp) %>% 
+  distinct()
+
+pp_processed <- left_join(pp_processed, product_names, by = "pp_code")
+
+# Check if any of the id number columns have leading zeros
+sum(startsWith(pp_employment$pp_idnum, "0"))
+sum(startsWith(pp_address$pp_idnum, "0"))
+
+# No leading zeros, change id and year column to numeric
+pp_employment$pp_idnum <- as.numeric(pp_employment$pp_idnum)
+pp_address$pp_idnum <- as.numeric(pp_address$pp_idnum)
+pp_processed$year <- as.numeric(pp_processed$year)
+pp_employment$year <- as.numeric(pp_employment$year)
+
+# Check number of distinct pp_idnum in each dataset
+print(n_distinct(pp_employment$pp_idnum))
+print(n_distinct(pp_processed$pp_idnum))
+print(n_distinct(pp_address$pp_idnum))
+
+
+# Check years included
+print(unique(pp_employment$year))
+print(unique(pp_processed$year))
+
+# Combine employment and location info
+wc_processors <- pp_address %>% 
+  filter(plant_state_abrv %in% c("OR", "WA", "CA") | 
+           (plant_city == "AT SEA PROCESSOR" & 
+              (is.na(plant_state_abrv))) |
+           (state_abrv %in% c("OR", "WA", "CA") &
+              (is.na(plant_state_abrv))))
+```
+
+
+## Location information
+```{r}
+wc_processors <- wc_processors %>%
+  mutate(full_address = paste(plant_city, plant_state_abrv, plant_zip, sep = ", "))
+
+# Get processor coordinates based on plant location
+wc_processors <- wc_processors %>%
+  geocode(
+    address = full_address,
+    method = "osm",
+    lat = latitude,
+    long = longitude
+  )
+
+# Assign port group and region using crosswalk function
+wc_processors <- assign_county(wc_processors) %>% 
+  clean_names() %>% 
+  rename(countyfp = county_2, county_1 = county, county = name)
+
+port_county_region <- iopac_ports %>% 
+  select(io_pac_port_group, county, region) %>% 
+  unique()
+
+wc_processors <- left_join(wc_processors, port_county_region, by = "county")
+
+# Assign Other to NA port groups
+wc_processors$io_pac_port_group[is.na(wc_processors$io_pac_port_group)] <- "Other"
+
+# Save to csv
+write.csv(wc_processors, file = here("data/processed_products/cleaned/wc_pp_address.csv"), row.names = FALSE)
+```
+
+```{r}
+wc_processors <- read_csv(here("data/processed_products/cleaned/wc_pp_address.csv"))
+# Change employment month to column
+pp_employment <- pp_employment %>% 
+  pivot_longer(
+    cols = ends_with("_emp"),
+    names_to = "month",
+    values_to = "employees",
+    names_pattern = "(.*)_emp"
+  )
+
+# Change month to a number value
+pp_employment <- pp_employment %>% 
+  mutate(month = match(tolower(month), tolower(month.abb)))
+
+# Combine location and employment information for west coast
+wc_employment_location <- inner_join(pp_employment, wc_processors, by = "pp_idnum")
+
+
+# Save to csv
+write.csv(wc_employment_location, file = here("data/processed_products/cleaned/wc_employment_location.csv"))
+
+```
+
+```{r}
+# Combine product and location info for west coast
+wc_products_location <- inner_join(pp_processed, wc_processors, by = "pp_idnum")
+
+# Add general product column to pp_processed
+wc_products_location <- wc_products_location %>% 
+  rename(product = pp_dscp)
+
+general_products <- c(
+  "SALMON" = "SALMON",
+  "TUNA" = "TUNA",
+  "HAKE" = "HAKE",
+  "WAHOO" = "WAHOO",
+  "CRAB" = "CRAB",
+  "HALIBUT" = "HALIBUT",
+  "SABLEFISH" = "SABLEFISH",
+  "SQUID" = "SQUID",
+  "SHRIMP" = "SHRIMP",
+  "BONITO" = "TUNA",
+  "COD" = "COD",
+  "CUCUMBER" = "SEA CUCUMBER",
+  "FLOUNDER" = "FLOUNDER",
+  "POLLOCK" = "POLLOCK",
+  "PERCH" = "ROCKFISH",
+  "ROCKFISH" = "ROCKFISH",
+  "TROUT" = "TROUT",
+  "CLAM" = "CLAMS",
+  "OYSTER" = "OYSTERS",
+  "SWORD" = "SWORDFISH",
+  "DRUM" = "DRUM",
+  "TILAPIA" = "TILAPIA",
+  "BASS" = "BASS",
+  "GROUPER" = "GROUPER",
+  "MARLIN" = "MARLIN",
+  "ESCOLAR" = "ESCOLAR",
+  "OCTOPUS" = "OCTOPUS",
+  "BUFFALO" = "BUFFALOFISH",
+  "STURGEON" = "STURGEON",
+  "MUSSEL" = "MUSSELS",
+  "SKATE" = "SKATES",
+  "LOBSTER" = "LOBSTER",
+  "DOLPHIN" = "DORADO",
+  "OPAH" = "OPAH",
+  "ANGLER" = "ANGLER",
+  "ROUGHY" = "ORANGE ROUGHY",
+  "CRAW" = "CRAWFISH",
+  "SMELT" = "SMELT",
+  "JACK" = "JACK",
+  "SARDINE" = "SARDINE",
+  "SEAWEED" = "SEAWEED",
+  "HERRING" = "HERRING",
+  "MACKEREL" = "MACKEREL",
+  "SCALLOP" = "SCALLOPS"
+)
+
+# Loop through the generalized terms
+wc_products_location <- wc_products_location %>%
+  mutate(product_general = sapply(product, function(x) {
+    match <- names(general_products)[str_detect(x, names(general_products))]
+    if (length(match) > 0) {
+      general_products[match[1]]
+    } else if (str_detect(x, "UNCL")) { #UNCL to unclassified if didn't match others
+      "UNCLASSIFIED"
+    } else {
+      "OTHER" # Assign other if nothing else
+    }
+  }))
+
+# Save to csv
+write.csv(wc_products_location, file = here("data/processed_products/cleaned/wc_products_location.csv"))
+```
+
