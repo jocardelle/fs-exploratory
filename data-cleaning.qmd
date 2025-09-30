@@ -92,7 +92,7 @@ print(unique(pp_employment$year))
 print(unique(pp_processed$year))
 
 # Combine employment and location info
-wc_processors <- pp_address %>% 
+pp_processors <- pp_address %>% 
   filter(plant_state_abrv %in% c("OR", "WA", "CA") | 
            (plant_city == "AT SEA PROCESSOR" & 
               (is.na(plant_state_abrv))) |
@@ -103,34 +103,34 @@ wc_processors <- pp_address %>%
 
 ## Location information
 ```{r}
-wc_processors <- wc_processors %>%
+pp_processors <- pp_processors %>%
   mutate(full_address = paste(plant_city, plant_state_abrv, plant_zip, sep = ", "))
 
 # Get processor coordinates based on plant location
-wc_processors <- wc_processors %>%
-  geocode(
-    address = full_address,
-    method = "osm",
-    lat = latitude,
-    long = longitude
-  )
-
-# Assign port group and region using crosswalk function
-wc_processors <- assign_county(wc_processors) %>% 
-  clean_names() %>% 
-  rename(countyfp = county_2, county_1 = county, county = name)
-
-port_county_region <- iopac_ports %>% 
-  select(io_pac_port_group, county, region) %>% 
-  unique()
-
-wc_processors <- left_join(wc_processors, port_county_region, by = "county")
-
-# Assign Other to NA port groups
-wc_processors$io_pac_port_group[is.na(wc_processors$io_pac_port_group)] <- "Other"
-
-# Save to csv
-write.csv(wc_processors, file = here("data/processed_products/cleaned/wc_pp_address.csv"), row.names = FALSE)
+# wc_processors <- pp_processors %>%
+#   geocode(
+#     address = full_address,
+#     method = "osm",
+#     lat = latitude,
+#     long = longitude
+#   )
+# 
+# # Assign port group and region using crosswalk function
+# wc_processors <- assign_county(wc_processors) %>% 
+#   clean_names() %>% 
+#   rename(countyfp = county_2, county_1 = county, county = name)
+# 
+# port_county_region <- iopac_ports %>% 
+#   select(io_pac_port_group, county, region) %>% 
+#   unique()
+# 
+# wc_processors <- left_join(wc_processors, port_county_region, by = "county")
+# 
+# # Assign Other to NA port groups
+# wc_processors$io_pac_port_group[is.na(wc_processors$io_pac_port_group)] <- "Other"
+# 
+# # Save to csv
+# write.csv(wc_processors, file = here("data/processed_products/cleaned/wc_pp_address.csv"), row.names = FALSE)
 ```
 
 ```{r}

@@ -1,0 +1,165 @@
+---
+title: "Fish Ticket,FishEye, Processed Products Dealers"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+library(tidyverse)
+library(here)
+library(dplyr)
+library(stringr)
+library(fuzzyjoin)
+library(janitor)
+```
+
+```{r}
+# Fish ticket data
+fish_ticket <- read_csv(here("data/pacfin/pacfin_products_general.csv"))
+
+# Fish ticket dealers
+ft_dealers <- read_csv(here("data/pacfin/unique_dealers.csv")) %>% 
+  clean_names() %>% 
+  select(dealer_id, dealer_num, dealer_name)
+
+# Processed products data
+pp_processors <- read_csv(here("data/processed_products/cleaned/wc_pp_address.csv"))
+
+# Fish eye data
+load(here("data/fisheye/edc_data.rda"))
+```
+
+```{r}
+# Clean edc data
+edc_employment_dat <- edc_employment_dat %>% 
+  clean_names()
+
+edc_pacfin_dat <- edc_pacfin_dat %>% 
+  clean_names()
+
+edc_production_dat <- edc_production_dat %>% 
+  clean_names()
+
+edc_purchase_dat <- edc_purchase_dat %>% 
+  clean_names()
+
+species_dat <- species_dat %>% 
+  clean_names()
+```
+
+# Name matching  processed products and fish ticket
+
+```{r}
+
+pp_distinct <- pp_processors %>% 
+  distinct(pp_idnum, company)
+
+# Find pp_idnum in company
+pp_pacfin_match_1 <- lapply(seq_len(nrow(pp_processors)), function(i) {
+  comp <- pp_processors$company[i]
+  id   <- pp_processors$pp_idnum[i]
+  
+  fish_ticket %>%
+    filter(str_detect(dealer_name, fixed(comp, ignore_case = TRUE))) %>%
+    mutate(company = comp,
+           pp_idnum = id) %>%
+    select(dealer_name, dealer_num, company, pp_idnum)
+}) %>%
+  bind_rows()
+
+pp_pacfin_match_1 <- pp_pacfin_match_1 %>% 
+  distinct()
+
+# Check original number of distinct dealers and processors
+n_distinct(pp_processors$pp_idnum)
+n_distinct(fish_ticket$dealer_num)
+
+# Check distinct processors nad dealers after matching
+n_distinct(pp_pacfin_match_1$dealer_num)
+n_distinct(pp_pacfin_match_1$pp_idnum)
+```
+
+# Name matching separate fish ticket  first
+```{r}
+# Separate dealer_name in fish tickets by double space or hyphen
+fish_ticket_split <- fish_ticket %>% 
+  mutate(
+    company = str_split_fixed(dealer_name, "  ", 2)[, 1],
+    location = str_split_fixed(dealer_name, "  ", 2)[, 2]
+  ) %>% 
+  mutate(dealer = str_split_fixed(company, " - ", 2)[, 1],
+    location_2 = str_split_fixed(company, " - ", 2)[, 2]
+    ) %>% 
+  relocate(dealer, location, location_2, .before = dealer_name) %>% 
+  select(-c(dealer_name, company)) %>% 
+  select(dealer, dealer_num) %>% 
+  distinct()
+
+
+pp_distinct <- pp_processors %>% 
+  distinct(pp_idnum, company)
+    
+# Join distinct ft dealers and pp processors
+pp_pacfin_match_2 <- inner_join(fish_ticket_split, pp_distinct, by = c("dealer" = "company"), relationship = "many-to-many") %>% distinct()
+
+# Check distinct processors and dealers after matching
+n_distinct(pp_pacfin_match_2$pp_idnum)
+n_distinct(pp_pacfin_match_2$dealer_num)
+```
+
+# EDC and Pacfin Data
+```{r}
+# connecting fish ticket and edc data
+ft_dealers$dealer_num <- as.character(ft_dealers$dealer_num)
+
+
+edc_pacfin_dat_sep <- edc_pacfin_dat %>%
+  mutate(
+    year_2 = substr(proc_ghidyear, nchar(proc_ghidyear) - 3, nchar(proc_ghidyear)),
+    ghid   = substr(proc_ghidyear, 1, nchar(proc_ghidyear) - 4)
+  )
+
+edc_ghid_unique <- edc_pacfin_dat_sep %>% 
+  select(proc, ghid) %>% 
+  distinct()
+
+edc_pacfin_match <- inner_join(edc_ghid_unique, ft_dealers, by = c("proc" = "dealer_num")) %>% 
+  rename("dealer_num" = "proc") %>% 
+  filter(!is.na(ghid))
+
+# Check in fish ticket if different companies have the same dealer_num
+fish_ticket_check <- fish_ticket %>% 
+  filter(dealer_num == "1505" )
+
+fish_ticket_check <- fish_ticket %>% 
+  filter(dealer_num == "0807" )
+
+n_distinct(edc_pacfin_dat_sep$ghid)
+n_distinct(edc_pacfin_match$ghid)
+n_distinct(edc_pacfin_match$dealer_num)
+
+```
+
+# Match all 3 datasets
+```{r}
+# Join all 3
+ft_edc_pp <- full_join(edc_pacfin_match, pp_pacfin_match_1, by = "dealer_num")
+
+ft_edc_pp_2 <- full_join(edc_pacfin_match, pp_pacfin_match_2, by = "dealer_num")
+
+n_distinct(ft_edc_pp$dealer_num)
+n_distinct(ft_edc_pp_2$dealer_num)
+
+edc_pp_match <- ft_edc_pp %>% 
+  filter(!is.na(ghid) & !is.na(pp_idnum))
+
+edc_pp_match_2 <- ft_edc_pp_2 %>% 
+  filter(!is.na(ghid) & !is.na(pp_idnum))
+
+n_distinct(edc_pp_match$dealer_num)
+n_distinct(edc_pp_match_2$dealer_num)
+```
+

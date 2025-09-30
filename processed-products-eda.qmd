@@ -198,6 +198,25 @@ ggplot() +
         axis.ticks = element_blank(),
         axis.title = element_blank()) +
   guides(size = "none")
+
+# Plot again but with log scaled legend
+ggplot() +
+  geom_sf(data = states, fill = NA, color = "gray70") +
+  geom_sf(data = roads_region, color = "black", linewidth = 0.3, alpha = 0.6) +
+  geom_sf(
+    data = all_emp,
+    aes(size = avg_employees, fill = avg_employees),
+    shape = 21, color = "black", alpha = 0.8
+  ) +
+  scale_fill_viridis_c(option = "plasma", name = "Average Employees", trans = "log10",
+        labels = scales::label_number()) +
+  facet_wrap(~decade, nrow = 1) +
+  theme_minimal() +
+  labs(title = "Processor Employment Across Decades") +
+    theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank()) +
+  guides(size = "none")
 ```
 
 
@@ -228,6 +247,30 @@ revenue
 
 
 # Products
+
+```{r}
+region_pounds <- pp_processed %>% 
+  filter(!is.na(region)) %>%
+  group_by(year, region) %>% 
+  summarise(poundage = sum(pounds, na.rm = TRUE), .groups = "drop")
+
+region_pounds$region <- factor(region_pounds$region, levels = region_location)
+
+poundage <- ggplot(region_pounds, aes(x = year, y = poundage, group = region, color = region)) +
+  geom_line(linewidth = 1) +
+  scale_color_paletteer_d("ggthemes::Color_Blind") +
+  scale_x_continuous(breaks = seq(1970, 2022, by = 10)) +
+  scale_y_continuous(labels = label_number(scale = 1e-9, suffix = "B", accuracy = 1)) + 
+  ggtitle("Yearly Processor Product Poundage by Region") +
+  xlab("Year") +
+  ylab("Product Poundage (lb)") +
+  labs(color = "Region") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+poundage
+```
+
 ```{r}
 # Calculate products wholesale price by year
 product_revenue <- pp_processed %>% 
