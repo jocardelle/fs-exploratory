@@ -15,6 +15,7 @@ library(dplyr)
 library(janitor)
 library(snakecase)
 library(tidygeocoder)
+library(zipcodeR)
 ```
 
 ## Source functions
@@ -37,8 +38,12 @@ product_names <- read_csv(here("data/processed_products/original/pp_names.csv"))
 pp_address <- read_excel(here("data/processed_products/original/pp_address_23.xlsx")) %>% 
   clean_names()
 
-# Processor employment
+# Processor employment 1970 - 2022
 pp_employment <- read_excel(here("data/processed_products/original/pp_employment.xlsx")) %>% 
+  clean_names()
+
+# Processor employment 2023
+pp_employment_23 <- read_excel(here("data/processed_products/original/pp_employment2023_.xlsx")) %>% 
   clean_names()
 
 # County to iopac port group
@@ -49,6 +54,9 @@ iopac_ports <- read.csv(here("data/location_info/ports_counties.csv")) %>%
 
 # Clean/Explore Data
 ```{r}
+# Combine employment years
+pp_employment <- rbind(pp_employment, pp_employment_23)
+
 # Change port groups to lower snake case
 iopac_ports$io_pac_port_group <- to_snake_case(iopac_ports$io_pac_port_group)
 
@@ -106,7 +114,64 @@ pp_processors <- pp_address %>%
 pp_processors <- pp_processors %>%
   mutate(full_address = paste(plant_city, plant_state_abrv, plant_zip, sep = ", "))
 
-# Get processor coordinates based on plant location
+# Get coordinates based on plant zip code
+pp_processors_zip <- geocode_zip(pp_processors$plant_zip)
+
+# find zip codes with NA lat and long
+zip_codes_na <- pp_processors_zip$zipcode[is.na(pp_processors_zip$lat)]
+
+print(zip_codes_na)
+
+
+# Fix zip codes with NA coordinates
+zip_fix <- data.frame(
+  zipcode = c(
+    "90608","90733","90748","90749","92013","92018","92112","92186",
+    "92517","92652","93011","93032","93102","93130","93140","93160",
+    "93386","93456","93515","93902","93922","93942","94018","94026",
+    "94064","94083","94119","94120","94126","94141","94188","94522",
+    "94604","94807","94912","94966","95001","95061","95150","95151",
+    "95156","95159","95201","95309","95353","95402","95473","95812",
+    "95813","97143","97238","98009","98041","98073","98083","98093",
+    "98111","98114","98124","98206","98227","98231","98352","98386",
+    "98395","98401","98623","98637"
+  ),
+  lat = c(
+    33.9170,33.7361,33.7600,33.7600,33.1581,33.1581,32.7157,32.7157,
+    33.9533,33.5427,34.2856,34.2856,34.4208,34.4208,34.4208,34.4208,
+    35.3530,34.8686,36.6056,36.6002,36.4326,36.6002,37.5879,37.4558,
+    37.5159,37.5003,37.7749,37.7749,37.7749,37.7749,37.7749,38.2494,
+    37.8044,37.9358,38.2360,38.1165,36.9530,37.0510,37.3382,37.3382,
+    37.3382,37.3382,37.9577,37.7047,37.6393,38.4405,38.4405,38.5816,
+    38.5816,45.6905,45.5235,47.6101,47.7543,47.6780,47.6800,47.2484,
+    47.6038,47.6100,47.6062,48.4360,48.7596,48.8758,47.1600,47.1500,
+    47.4290,47.2533,46.0007,46.2712
+  ),
+  lng = c(
+    -118.0330,-118.2923,-118.1190,-118.1190,-117.3506,-117.3506,-117.1611,-117.1611,
+    -117.3961,-117.7831,-119.2474,-119.2474,-119.6982,-119.6982,-119.6982,-119.6982,
+    -118.9930,-120.4351,-117.8322,-121.8540,-121.9043,-121.8540,-122.5099,-122.1914,
+    -122.2746,-122.2687,-122.4194,-122.4194,-122.4194,-122.4194,-122.4194,-121.7793,
+    -122.2711,-122.3470,-122.9990,-123.0357,-122.0540,-122.1370,-121.8863,-121.8863,
+    -121.8863,-121.8863,-121.2897,-120.9969,-121.0129,-122.7075,-122.7075,-121.4920,
+    -121.4920,-123.9578,-122.6765,-122.2007,-122.1230,-122.1810,-122.1790,-122.3110,
+    -122.3321,-122.3320,-122.3321,-122.6130,-122.4440,-122.5840,-122.8500,-122.8500,
+    -122.5000,-122.4430,-122.7590,-123.9037
+  )
+)
+
+pp_processors_zip <- left_join(pp_processors_zip, zip_fix, by = "zipcode")
+
+pp_processors_zip <- pp_processors_zip %>% 
+  mutate(
+    lat = coalesce(lat.x, lat.y),
+    lon = coalesce(lng.x, lng.y)
+  ) %>% 
+  select(zipcode, lat, lon)
+
+wc_processors <- left_join(pp_processors, pp_processors_zip, by = c("plant_zip" = "zipcode"))
+
+# # Get processor coordinates based on plant location
 # wc_processors <- pp_processors %>%
 #   geocode(
 #     address = full_address,
@@ -114,24 +179,96 @@ pp_processors <- pp_processors %>%
 #     lat = latitude,
 #     long = longitude
 #   )
-# 
-# # Assign port group and region using crosswalk function
-# wc_processors <- assign_county(wc_processors) %>% 
-#   clean_names() %>% 
-#   rename(countyfp = county_2, county_1 = county, county = name)
-# 
-# port_county_region <- iopac_ports %>% 
-#   select(io_pac_port_group, county, region) %>% 
-#   unique()
-# 
-# wc_processors <- left_join(wc_processors, port_county_region, by = "county")
-# 
-# # Assign Other to NA port groups
-# wc_processors$io_pac_port_group[is.na(wc_processors$io_pac_port_group)] <- "Other"
-# 
-# # Save to csv
-# write.csv(wc_processors, file = here("data/processed_products/cleaned/wc_pp_address.csv"), row.names = FALSE)
+# # 
+# # # Assign port group and region using crosswalk function
+wc_processors <- assign_county(wc_processors) %>%
+  clean_names() %>%
+  rename(countyfp = county_2, county_1 = county, county = name)
+
+port_county_region <- iopac_ports %>%
+  select(io_pac_port_group, county, region) %>%
+  unique()
+
+wc_processors <- left_join(wc_processors, port_county_region, by = "county")
+
+# # # Assign Other to NA port groups
+wc_processors$io_pac_port_group[is.na(wc_processors$io_pac_port_group)] <- "Other"
+
 ```
+
+
+
+```{r}
+## Assign inland region based on plant zip
+# Function to assign inland region
+assign_inland_region <- function(zip, plant_city) {
+  
+  # Handle at-sea processors
+  if (!is.na(plant_city) && plant_city == "AT SEA PROCESSOR") {
+    return("at_sea_processor")
+  }
+  
+  # If ZIP is missing → NA
+  if (is.na(zip)) {
+    return(NA)
+  }
+  
+  # Convert ZIP to numeric safely
+  zip_num <- suppressWarnings(as.numeric(substr(zip, 1, 5)))
+  if (is.na(zip_num)) {
+    return(NA)
+  }
+  
+  # Washington inland
+  if (zip_num >= 98000 & zip_num <= 99499) {
+    return("inland_wa")
+  }
+  
+  # Oregon inland
+  if (zip_num >= 97000 & zip_num <= 97999) {
+    return("inland_or")
+  }
+  
+  # California southern
+  if (zip_num >= 90000 & zip_num <= 93399) {
+    return("inland_southern_ca")
+  }
+  
+  # California central
+  if (zip_num >= 93400 & zip_num <= 95499) {
+    return("inland_central_ca")
+  }
+  
+  # California northern
+  if (zip_num >= 95500 & zip_num <= 96199) {
+    return("inland_northern_ca")
+  }
+  
+  # Otherwise unknown
+  return(NA)
+}
+```
+
+
+```{r}
+# add inland region to processed products
+wc_processors <- wc_processors %>%
+  mutate(
+    inland_region = mapply(assign_inland_region, plant_zip, plant_city),
+    
+    # Replace "other" category with inland categories when available
+    io_pac_port_group_updated = case_when(
+      io_pac_port_group != "Other" ~ io_pac_port_group,
+      !is.na(inland_region) ~ inland_region,
+      TRUE ~ NA_character_   # keep remaining other-but-no-zip as na
+    )
+  )
+
+
+# # Save to csv
+write.csv(wc_processors, file = here("data/processed_products/cleaned/wc_pp_address.csv"), row.names = FALSE)
+```
+
 
 ```{r}
 wc_processors <- read_csv(here("data/processed_products/cleaned/wc_pp_address.csv"))
@@ -168,7 +305,9 @@ wc_products_location <- wc_products_location %>%
 general_products <- c(
   "SALMON" = "SALMON",
   "TUNA" = "TUNA",
+  "ALBACORE" = "TUNA",
   "HAKE" = "HAKE",
+  "WHITING" = "HAKE",
   "WAHOO" = "WAHOO",
   "CRAB" = "CRAB",
   "HALIBUT" = "HALIBUT",
@@ -182,8 +321,10 @@ general_products <- c(
   "POLLOCK" = "POLLOCK",
   "PERCH" = "ROCKFISH",
   "ROCKFISH" = "ROCKFISH",
+  "THORNYHEAD" = "ROCKFISH",
   "TROUT" = "TROUT",
   "CLAM" = "CLAMS",
+  "GEODUCK" = "CLAMS",
   "OYSTER" = "OYSTERS",
   "SWORD" = "SWORDFISH",
   "DRUM" = "DRUM",
@@ -209,7 +350,9 @@ general_products <- c(
   "SEAWEED" = "SEAWEED",
   "HERRING" = "HERRING",
   "MACKEREL" = "MACKEREL",
-  "SCALLOP" = "SCALLOPS"
+  "SCALLOP" = "SCALLOPS",
+  "SOLE" = "SOLE",
+  "PRAWN" = "PRAWN"
 )
 
 # Loop through the generalized terms

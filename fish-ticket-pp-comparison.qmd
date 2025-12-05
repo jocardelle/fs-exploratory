@@ -24,6 +24,34 @@ library(paletteer)
 
 ```{r}
 # Read in data
+ft_dealer_23 <- read_csv(here("data/pacfin/ftid_dealer_09_23.csv")) %>% 
+  filter(PACFIN_YEAR ==2023) %>% 
+  clean_names()
+
+
+dealers <- ft_dealer_23 %>% 
+  mutate(total_weight = sum(landed_weight_lbs))
+
+dealers <- dealers %>% 
+  mutate(
+    company = str_split_fixed(dealer_name, "  ", 2)[, 1],
+    location = str_split_fixed(dealer_name, "  ", 2)[, 2]
+  ) %>% 
+  mutate(dealer = str_split_fixed(company, " - ", 2)[, 1],
+    location_2 = str_split_fixed(company, " - ", 2)[, 2])
+  # relocate(dealer, location, location_2, .before = dealer_name) %>% 
+  # select(-c(dealer_name, company)) %>% 
+  # select(dealer, dealer_num) %>% 
+  # distinct()
+
+top_dealers <- dealers %>% 
+  group_by(dealer) %>% 
+  summarise(percent_weight = sum(landed_weight_lbs)/ total_weight * 100) %>% unique() %>% filter(percent_weight > 1)
+
+sum(top_dealers$percent_weight)
+    
+n_distinct(ft_dealer_23$DEALER_NAME)
+
 pacfin_dealers <- read_csv(here("data/pacfin/unique_dealers.csv")) %>% 
   clean_names()
 
@@ -45,6 +73,8 @@ pp_products <- read_csv(here("data/processed_products/cleaned/wc_products_locati
 # Rename port `Morro` to `Morro Bay` in pacfin data
 port_dealer$iopac_port_group[port_dealer$iopac_port_group=="MORRO"] <- "MORRO BAY"
 fish_ports$iopac_port_group[fish_ports$iopac_port_group=="MORRO"] <- "MORRO BAY"
+
+port_dealer$iopac_port_group <- to_snake_case(port_dealer$iopac_port_group)
 
 # Should dealer_num or dealer_id be used??
 n_distinct(pacfin_dealers$dealer_num)
@@ -87,6 +117,7 @@ general_products <- c(
   "TUNA" = "TUNA",
   "ALBACORE" = "TUNA",
   "HAKE" = "HAKE",
+  "WHITING" = "HAKE",
   "WAHOO" = "WAHOO",
   "CRAB" = "CRAB",
   "HALIBUT" = "HALIBUT",
@@ -97,7 +128,6 @@ general_products <- c(
   "COD" = "COD",
   "CUCUMBER" = "SEA CUCUMBER",
   "FLOUNDER" = "FLOUNDER",
-  "WHITING" = "POLLOCK",
   "POLLOCK" = "POLLOCK",
   "THORNYHEAD" = "ROCKFISH",
   "RCKFSH" = "ROCKFISH",
@@ -281,7 +311,6 @@ region_product_bump_chart("Central CA", filter_type = "top90")
 region_product_bump_chart("Southern CA", filter_type = "top90")
 ```
 
-
 # Sardine Exploration
 
 ```{r}
@@ -348,6 +377,3 @@ ft_sardine <- ggplot(ft_sardine_pounds, aes(x = pacfin_year, y = poundage, colou
   
 ft_sardine
 ```
-
-
-

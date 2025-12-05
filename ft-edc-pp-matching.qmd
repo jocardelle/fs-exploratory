@@ -6,7 +6,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-
 ```{r}
 library(tidyverse)
 library(here)
@@ -14,11 +13,13 @@ library(dplyr)
 library(stringr)
 library(fuzzyjoin)
 library(janitor)
+library(scales)
 ```
 
 ```{r}
 # Fish ticket data
 fish_ticket <- read_csv(here("data/pacfin/pacfin_products_general.csv"))
+
 
 # Fish ticket dealers
 ft_dealers <- read_csv(here("data/pacfin/unique_dealers.csv")) %>% 
@@ -27,6 +28,9 @@ ft_dealers <- read_csv(here("data/pacfin/unique_dealers.csv")) %>%
 
 # Processed products data
 pp_processors <- read_csv(here("data/processed_products/cleaned/wc_pp_address.csv"))
+
+# Processed products employment data
+pp_employment <- read_csv(here("data/processed_products/cleaned/wc_employment_location.csv"))
 
 # Fish eye data
 load(here("data/fisheye/edc_data.rda"))
@@ -50,7 +54,7 @@ species_dat <- species_dat %>%
   clean_names()
 ```
 
-# Name matching  processed products and fish ticket
+# Name matching processed products and fish ticket
 
 ```{r}
 
@@ -82,7 +86,8 @@ n_distinct(pp_pacfin_match_1$dealer_num)
 n_distinct(pp_pacfin_match_1$pp_idnum)
 ```
 
-# Name matching separate fish ticket  first
+# Name matching separate fish ticket first
+
 ```{r}
 # Separate dealer_name in fish tickets by double space or hyphen
 fish_ticket_split <- fish_ticket %>% 
@@ -111,6 +116,7 @@ n_distinct(pp_pacfin_match_2$dealer_num)
 ```
 
 # EDC and Pacfin Data
+
 ```{r}
 # connecting fish ticket and edc data
 ft_dealers$dealer_num <- as.character(ft_dealers$dealer_num)
@@ -144,6 +150,7 @@ n_distinct(edc_pacfin_match$dealer_num)
 ```
 
 # Match all 3 datasets
+
 ```{r}
 # Join all 3
 ft_edc_pp <- full_join(edc_pacfin_match, pp_pacfin_match_1, by = "dealer_num")
@@ -162,4 +169,5 @@ edc_pp_match_2 <- ft_edc_pp_2 %>%
 n_distinct(edc_pp_match$dealer_num)
 n_distinct(edc_pp_match_2$dealer_num)
 ```
+
 

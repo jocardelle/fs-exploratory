@@ -1,0 +1,829 @@
+---
+title: "processing_landing_locations"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+We want to start exploring time how product type has shifted over time and space.The first way we will explore this is a timeseries of species pounds landed vs species pounds processed. 
+
+We will also look at the decadal landing locations vs processing locations (iopac port groups).
+
+
+## Setup
+### Load libraries
+```{r}
+library(tidyverse)
+library(here)
+library(dplyr)
+library(scales)
+library(forcats)
+library(gridExtra)
+library(patchwork)
+library(purrr)
+library(sf)
+library(geosphere)
+```
+
+
+### Data
+```{r}
+pp <- read_csv(here("data/processed_products/cleaned/wc_products_location.csv"))
+
+ft_species <- read_csv(here("data/pacfin/pacfin_products_general.csv"))
+
+pp_employment <- read_csv(here("data/processed_products/cleaned/wc_employment_location.csv"))
+
+port_shapes <- readRDS(here("data/IOPAC_shapefiles.RDS"))
+
+bls <- read_csv(here("data/bls_2023_employment.csv"))
+```
+
+# Landing vs Processing timeseries
+Here we are going to look at specific species pounds being landed vs processed over time.
+
+### Sardine
+```{r}
+pp_sardine <- pp %>% 
+  filter(product_general == "SARDINE")
+
+pp_sardine_lb <- pp_sardine %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_sardine <- ft_species %>% 
+  filter(product_general == "SARDINE")
+
+ft_sardine_lb <- ft_sardine %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+ggplot() +
+  geom_line(data = pp_sardine_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_sardine_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  xlim(1980, 2025) +
+  labs(title = "Sardine Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+### Salmon
+```{r}
+pp_salmon <- pp %>% 
+  filter(product_general == "SALMON")
+
+pp_salmon_lb <- pp_salmon %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_salmon <- ft_species %>% 
+  filter(product_general == "SALMON")
+
+ft_salmon_lb <- ft_salmon %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+ggplot() +
+  geom_line(data = pp_salmon_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_salmon_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title = "Salmon Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+### Hake
+```{r}
+pp_hake <- pp %>% 
+  filter(product_general == "HAKE")
+
+pp_hake_lb <- pp_hake %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_hake <- ft_species %>% 
+  filter(product_general == "HAKE")
+
+ft_hake_lb <- ft_hake %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+ggplot() +
+  geom_line(data = pp_hake_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_hake_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title = "Hake Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+### Tuna
+```{r}
+pp_tuna <- pp %>% 
+  filter(product_general == "TUNA")
+
+pp_tuna_lb <- pp_tuna %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_tuna <- ft_species %>% 
+  filter(product_general == "TUNA")
+
+ft_tuna_lb <- ft_tuna %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+ggplot() +
+  geom_line(data = pp_tuna_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_hake_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title = "Tuna Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+
+
+# Landing vs Processing Locations
+
+Now we'll take a closer look at how landing and processing locations differ. We'll use iopac port groups as locations, with inland categories as well.
+
+
+### Function for locations and decades (non-faceted)
+
+```{r}
+plot_fish_decade <- function(species_name, start_year, end_year) {
+  
+  # Order port groups
+  port_order <- c(
+    # WA Coast
+    "puget_sound",
+    "north_wa_coast",
+    "south_and_central_wa_coast",
+    "inland_wa",
+    
+    # OR Coast
+    "columbia_river",
+    "astoria",
+    "tillamook",
+    "newport",
+    "coos_bay",
+    "brookings",
+    "inland_or",
+    
+    # Northern CA Coast
+    "crescent_city",
+    "eureka",
+    "fort_bragg",
+    "bodega_bay",
+    "inland_northern_ca",
+    
+    # Central CA Coast
+    "san_francisco",
+    "monterey",
+    "morro_bay",
+    "inland_central_ca",
+    
+    # Southern CA Coast
+    "santa_barbara",
+    "los_angeles",
+    "san_diego",
+    "inland_southern_ca",
+    
+    # Special categories
+    "at_sea_processor",
+    "NA"
+  )
+  
+  port_labels <- c(
+    "Puget Sound",
+    "North WA Coast",
+    "South & Central WA Coast",
+    "Inland WA",
+    
+    "Columbia River",
+    "Astoria",
+    "Tillamook",
+    "Newport",
+    "Coos Bay",
+    "Brookings",
+    "Inland OR",
+    
+    "Crescent City",
+    "Eureka",
+    "Fort Bragg",
+    "Bodega Bay",
+    "Inland Northern CA",
+    
+    "San Francisco",
+    "Monterey",
+    "Morro Bay",
+    "Inland Central CA",
+    
+    "Santa Barbara",
+    "Los Angeles",
+    "San Diego",
+    "Inland Southern CA",
+    
+    "At-Sea Processor",
+    "NA"
+  )
+  
+  # Filter processed products
+  pp_sub <- pp %>%
+    filter(product_general == species_name,
+           year >= start_year, year <= end_year) %>%
+    group_by(io_pac_port_group_updated) %>%            
+    summarise(total_pounds = sum(pounds, na.rm = TRUE), .groups = "drop") %>%
+    mutate(percent = total_pounds / sum(total_pounds) * 100,
+           dataset = "Processed Products") %>%
+    rename(port_group = io_pac_port_group_updated)
+  
+  # Filter fish tickets
+  ft_sub <- ft_species %>%
+    filter(product_general == species_name,
+           pacfin_year >= start_year, pacfin_year <= end_year) %>%
+    group_by(iopac_port_group) %>%
+    summarise(total_pounds = sum(landed_weight_lbs, na.rm = TRUE), .groups = "drop") %>%
+    mutate(percent = total_pounds / sum(total_pounds) * 100,
+           dataset = "Fish Tickets") %>%
+    rename(port_group = iopac_port_group)
+  
+  # Combine processed products and fish tickets
+  combined <- bind_rows(pp_sub, ft_sub) %>%
+    mutate(port_group = tolower(port_group),
+           port_group = ifelse(is.na(port_group), "NA", port_group),
+           port_group = factor(port_group,
+                               levels = c(port_order, "NA"),
+                               labels = c(port_labels, "NA")))
+  
+  # Drop groups that have less than 5% poundage in both data sets
+  combined <- combined %>%
+  group_by(dataset) %>%
+  filter(percent >= 1) %>%
+  ungroup()
+
+
+  # Plot
+  ggplot(combined, aes(x = percent, 
+                       y = fct_rev(port_group), 
+                       fill = dataset)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    scale_fill_manual(values = c("Processed Products" = "cornflowerblue", 
+                                 "Fish Tickets" = "firebrick")) +
+    scale_x_continuous(labels = percent_format(scale = 1), limits = c(0, NA)) +
+    labs(title = paste0(start_year, "–", end_year, " ", species_name, 
+                        " Processing vs. Landings Location"),
+         x = paste0("Percent of Total Poundage"),
+         y = "IO-PAC Port Group/Region",
+         fill = NULL) +
+    theme_minimal(base_size = 13) +
+    # scale_y_discrete(drop = FALSE) + # This makes sure all iopac port groups are included
+    theme(legend.position = "top",
+          plot.title = element_text(face = "bold"),
+          axis.title.y = element_text(margin = margin(r = 10)),
+          axis.title.x = element_text(margin = margin(t = 10)))
+}
+```
+
+
+### Faceted with 4 decades on one plot
+```{r}
+plot_fish_decades_faceted <- function(species_name, decades_list) {
+  
+  # Port order & labels
+  port_order <- c(
+    "puget_sound",
+    "north_wa_coast",
+    "south_and_central_wa_coast",
+    "inland_wa",
+    "columbia_river",
+    "astoria",
+    "tillamook",
+    "newport",
+    "coos_bay",
+    "brookings",
+    "inland_or",
+    "crescent_city",
+    "eureka",
+    "fort_bragg",
+    "bodega_bay",
+    "inland_northern_ca",
+    "san_francisco",
+    "monterey",
+    "morro_bay",
+    "inland_central_ca",
+    "santa_barbara",
+    "los_angeles",
+    "san_diego",
+    "inland_southern_ca",
+    "at_sea_processor"
+  )
+  
+  port_labels <- c(
+    "Puget Sound","North WA Coast","South & Central WA Coast","Inland WA",
+    "Columbia River","Astoria","Tillamook","Newport","Coos Bay","Brookings","Inland OR",
+    "Crescent City","Eureka","Fort Bragg","Bodega Bay","Inland Northern CA",
+    "San Francisco","Monterey","Morro Bay","Inland Central CA",
+    "Santa Barbara","Los Angeles","San Diego","Inland Southern CA",
+    "At-Sea Processor"
+  )
+
+  # Loop over decades
+  all_decades <- map_dfr(decades_list, function(decade) {
+    
+    start_year <- decade[1]
+    end_year   <- decade[2]
+    
+    # Processed products
+    pp_sub <- pp %>%
+      filter(product_general == species_name,
+             year >= start_year, year <= end_year) %>%
+      group_by(io_pac_port_group_updated) %>%
+      summarise(total_pounds = sum(pounds, na.rm = TRUE), .groups = "drop") %>%
+      mutate(percent = total_pounds / sum(total_pounds) * 100,
+             dataset = "Processed Products",
+             port_group = io_pac_port_group_updated)
+    
+    # Fish tickets
+    ft_sub <- ft_species %>%
+      filter(product_general == species_name,
+             pacfin_year >= start_year, pacfin_year <= end_year) %>%
+      group_by(iopac_port_group) %>%
+      summarise(total_pounds = sum(landed_weight_lbs, na.rm = TRUE), .groups = "drop") %>%
+      mutate(percent = total_pounds / sum(total_pounds) * 100,
+             dataset = "Fish Tickets",
+             port_group = iopac_port_group)
+    
+    # Combine
+    combined <- bind_rows(pp_sub, ft_sub) %>%
+      mutate(
+        decade = paste0(start_year, "–", end_year),
+        port_group = tolower(port_group),
+        port_group = ifelse(is.na(port_group), "NA", port_group)
+      )
+    
+    combined
+  })
+  
+  # filter ports that are less than 1% processing and landings
+  # filtered <- all_decades %>%
+  #   group_by(decade, dataset) %>%
+  #   filter(percent >= 1) %>%
+  #   ungroup()
+  
+  # Order ports
+  filtered <- all_decades %>%
+    mutate(port_group = factor(port_group, levels = port_order, labels = port_labels))
+  # Find x-axis limit (max percent)
+  max_percent <- max(filtered$percent, na.rm = TRUE)
+  
+  # Plot
+  ggplot(filtered,
+         aes(x = percent, y = fct_rev(port_group), fill = dataset)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    facet_wrap(~ decade, ncol = 2, scales = "fixed") +
+    scale_fill_manual(values = c("Processed Products" = "cornflowerblue",
+                                 "Fish Tickets" = "firebrick")) +
+    scale_x_continuous(labels = percent_format(scale = 1),
+                       limits = c(0, max_percent * 1.05)) +
+    scale_y_discrete(drop = FALSE) + # KEEP ALL PORTS
+    labs(
+      title = paste0(species_name, " — Processing vs. Landings Locations"),
+      x = "Percent of Total Poundage",
+      y = "IO-PAC Port Group/Region",
+      fill = NULL
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      legend.position = "top",
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title.y = element_text(margin = margin(r = 10)),
+      axis.title.x = element_text(margin = margin(t = 10))
+    )
+}
+```
+
+## Species Location Plots
+```{r}
+salmon <- plot_fish_decades_faceted(
+  "SALMON",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+ggsave(here("plots/presentation/12-2/salmon_land_proc.png"), salmon, width = 14, height = 12, units = "in")
+
+sardine <- plot_fish_decades_faceted(
+  "SARDINE",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+ggsave(here("plots/presentation/12-2/sardine_land_proc.png"), sardine, width = 14, height = 12, units = "in")
+
+hake <- plot_fish_decades_faceted(
+  "HAKE",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+ggsave(here("plots/presentation/12-2/hake_land_proc.png"), hake, width = 14, height = 12, units = "in")
+
+tuna <- plot_fish_decades_faceted(
+  "TUNA",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+ggsave(here("plots/presentation/12-2/tuna_land_proc.png"), tuna, width = 14, height = 12, units = "in")
+
+crab <- plot_fish_decades_faceted(
+  "CRAB",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+ggsave(here("plots/presentation/12-2/crab_land_proc.png"), crab, width = 14, height = 12, units = "in")
+
+squid <- plot_fish_decades_faceted(
+  "SQUID",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+ggsave(here("plots/presentation/12-2/squid_land_proc.png"), squid, width = 14, height = 12, units = "in")
+```
+
+
+### New column for groundfish and albacore
+```{r}
+# Add new column for groundfish and albacore
+groundfish <- c("ROCKFISH", "FLOUNDER", "COD", "SKATES", "SOLE", "THORNYHEAD", "SABLEFISH")
+
+pp <- pp %>% 
+  mutate(
+    specific_species = case_when(
+      str_detect(product, str_c(groundfish, collapse = "|")) ~ "GROUNDFISH",
+      str_detect(product, "ALBACORE") ~ "ALBACORE",
+      TRUE ~ NA_character_
+    )
+  )
+
+ft_species <- ft_species %>% 
+   mutate(
+    specific_species = case_when(
+      str_detect(pacfin_species_common_name, str_c(groundfish, collapse = "|")) ~ "GROUNDFISH",
+      str_detect(pacfin_species_common_name, "ALBACORE") ~ "ALBACORE",
+      TRUE ~ NA_character_
+    )
+  )
+   
+
+```
+
+
+# Centroids Distance processing/landing
+
+### IOPAC port group centroids
+```{r}
+# Shape files for iopac port groups
+iopac_sf <- port_shapes %>%
+  mutate(IOPAC_PORT_GROUP = tolower(IOPAC_PORT_GROUP) %>%
+           gsub(" ", "_", .))  
+# Compute centroids based off shape file
+iopac_centroids <- iopac_sf %>%
+  st_centroid() %>%
+  mutate(
+    lon = st_coordinates(.)[,1],
+    lat = st_coordinates(.)[,2]
+  ) %>%
+  st_drop_geometry() %>%
+  select(IOPAC_PORT_GROUP, lat, lon)
+
+
+ft_species_coords <- ft_species %>% 
+  left_join(iopac_centroids, by = c("iopac_port_group" = "IOPAC_PORT_GROUP"))
+
+st_crs(iopac_sf)
+```
+
+
+### Function for ploting centroid distance
+```{r}
+plot_mismatch <- function(species_name_input) {
+  
+  # Filter data by species
+  land_dat <- ft_species_coords %>%
+    filter(product_general == species_name_input,
+           !is.na(lat), !is.na(lon))
+  
+  proc_dat <- pp %>%
+    filter(product_general == species_name_input,
+           !is.na(lat), !is.na(lon))
+  
+  # Landings weighted centroid by landed weight
+  land_centroids <- land_dat %>%
+    group_by(product_general, pacfin_year) %>%
+    summarise(
+      land_lat = weighted.mean(lat, landed_weight_lbs, na.rm = TRUE),
+      land_lon = weighted.mean(lon, landed_weight_lbs, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Processing weighted centroid by pounds
+  proc_centroids <- proc_dat %>%
+    group_by(product_general, year) %>%
+    summarise(
+      proc_lat = weighted.mean(lat, pounds, na.rm = TRUE),
+      proc_lon = weighted.mean(lon, pounds, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Distance between centroids
+  mismatch <- land_centroids %>%
+    full_join(proc_centroids, by = c("product_general","pacfin_year" = "year")) %>%
+    mutate(
+      distance_km = distHaversine(
+        cbind(land_lon, land_lat),
+        cbind(proc_lon, proc_lat)
+      ) / 1000
+    )
+  
+  # Plot
+  ggplot(mismatch, aes(x = pacfin_year, y = distance_km)) +
+    geom_line(color = "royalblue4", linewidth = 0.75) +
+    geom_point() +
+    geom_smooth(method = "lm", linetype = "dashed") +
+    labs(
+      title = paste0(species_name_input, " Processing–Landings Centroid Mismatch"),
+      x = "Year",
+      y = "Distance (km)"
+    ) +
+    xlim(1980, 2025) +
+    scale_y_continuous(limits = c(0, NA)) +
+    theme_minimal(base_size = 13)
+}
+```
+
+
+## Species Centroid Plots
+```{r}
+salmon_centroid <- plot_mismatch("SALMON")
+ggsave(here("plots/presentation/12-2/salmon_centroid.png"), salmon_centroid, width = 12, height = 8, units = "in")
+
+sardine_centroid <- plot_mismatch("SARDINE")
+ggsave(here("plots/presentation/12-2/sardine_centroid.png"), sardine_centroid, width = 12, height = 8, units = "in")
+
+hake_centroid <- plot_mismatch("HAKE")
+ggsave(here("plots/presentation/12-2/hake_centroid.png"), hake_centroid, width = 12, height = 8, units = "in")
+
+tuna_centroid <- plot_mismatch("TUNA")
+ggsave(here("plots/presentation/12-2/tuna_centroid.png"), tuna_centroid, width = 12, height = 8, units = "in")
+
+squid_centroid <- plot_mismatch("SQUID")
+ggsave(here("plots/presentation/12-2/squid_centroid.png"), squid_centroid, width = 12, height = 8, units = "in")
+
+crab_centroid <- plot_mismatch("CRAB")
+ggsave(here("plots/presentation/12-2/crab_centroid.png"), crab_centroid, width = 12, height = 8, units = "in")
+```
+
+# Groundfish
+
+### Groundfish processing vs landings locations
+```{r}
+plot_gf_decades_faceted <- function(species_name, decades_list) {
+  
+  # Port order & labels
+  port_order <- c(
+    "puget_sound",
+    "north_wa_coast",
+    "south_and_central_wa_coast",
+    "inland_wa",
+    "columbia_river",
+    "astoria",
+    "tillamook",
+    "newport",
+    "coos_bay",
+    "brookings",
+    "inland_or",
+    "crescent_city",
+    "eureka",
+    "fort_bragg",
+    "bodega_bay",
+    "inland_northern_ca",
+    "san_francisco",
+    "monterey",
+    "morro_bay",
+    "inland_central_ca",
+    "santa_barbara",
+    "los_angeles",
+    "san_diego",
+    "inland_southern_ca",
+    "at_sea_processor"
+  )
+  
+  port_labels <- c(
+    "Puget Sound","North WA Coast","South & Central WA Coast","Inland WA",
+    "Columbia River","Astoria","Tillamook","Newport","Coos Bay","Brookings","Inland OR",
+    "Crescent City","Eureka","Fort Bragg","Bodega Bay","Inland Northern CA",
+    "San Francisco","Monterey","Morro Bay","Inland Central CA",
+    "Santa Barbara","Los Angeles","San Diego","Inland Southern CA",
+    "At-Sea Processor"
+  )
+
+  # Loop over decades
+  all_decades <- map_dfr(decades_list, function(decade) {
+    
+    start_year <- decade[1]
+    end_year   <- decade[2]
+    
+    # Processed products
+    pp_sub <- pp %>%
+      filter(specific_species == species_name,
+             year >= start_year, year <= end_year) %>%
+      group_by(io_pac_port_group_updated) %>%
+      summarise(total_pounds = sum(pounds, na.rm = TRUE), .groups = "drop") %>%
+      mutate(percent = total_pounds / sum(total_pounds) * 100,
+             dataset = "Processed Products",
+             port_group = io_pac_port_group_updated)
+    
+    # Fish tickets
+    ft_sub <- ft_species %>%
+      filter(specific_species == species_name,
+             pacfin_year >= start_year, pacfin_year <= end_year) %>%
+      group_by(iopac_port_group) %>%
+      summarise(total_pounds = sum(landed_weight_lbs, na.rm = TRUE), .groups = "drop") %>%
+      mutate(percent = total_pounds / sum(total_pounds) * 100,
+             dataset = "Fish Tickets",
+             port_group = iopac_port_group)
+    
+    # Combine
+    combined <- bind_rows(pp_sub, ft_sub) %>%
+      mutate(
+        decade = paste0(start_year, "–", end_year),
+        port_group = tolower(port_group),
+        port_group = ifelse(is.na(port_group), "NA", port_group)
+      )
+    
+    combined
+  })
+  
+  # filter ports that are less than 1% processing and landings
+  # filtered <- all_decades %>%
+  #   group_by(decade, dataset) %>%
+  #   filter(percent >= 1) %>%
+  #   ungroup()
+  
+  # Order ports
+  filtered <- all_decades %>%
+    mutate(port_group = factor(port_group, levels = port_order, labels = port_labels))
+  # Find x-axis limit (max percent)
+  max_percent <- max(filtered$percent, na.rm = TRUE)
+  
+  # Plot
+  ggplot(filtered,
+         aes(x = percent, y = fct_rev(port_group), fill = dataset)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    facet_wrap(~ decade, ncol = 2, scales = "fixed") +
+    scale_fill_manual(values = c("Processed Products" = "cornflowerblue",
+                                 "Fish Tickets" = "firebrick")) +
+    scale_x_continuous(labels = percent_format(scale = 1),
+                       limits = c(0, max_percent * 1.05)) +
+    scale_y_discrete(drop = FALSE) + # KEEP ALL PORTS
+    labs(
+      title = paste0(species_name, " — Processing vs. Landings Locations"),
+      x = "Percent of Total Poundage",
+      y = "IO-PAC Port Group/Region",
+      fill = NULL
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      legend.position = "top",
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title.y = element_text(margin = margin(r = 10)),
+      axis.title.x = element_text(margin = margin(t = 10))
+    )
+}
+
+
+groundfish <- plot_gf_decades_faceted(
+  "GROUNDFISH",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+
+ggsave(here("plots/presentation/12-2/groundfish_land_proc.png"), groundfish, width = 14, height = 12, units = "in")
+```
+
+
+### Groundfish Centroids
+```{r}
+plot_gf_mismatch <- function(species_name_input) {
+  
+  # Filter data by species
+  land_dat <- ft_species_coords %>%
+    filter(specific_species == species_name_input,
+           !is.na(lat), !is.na(lon))
+  
+  proc_dat <- pp %>%
+    filter(specific_species == species_name_input,
+           !is.na(lat), !is.na(lon))
+  
+  # Landings weighted centroid by landed weight
+  land_centroids <- land_dat %>%
+    group_by(specific_species, pacfin_year) %>%
+    summarise(
+      land_lat = weighted.mean(lat, landed_weight_lbs, na.rm = TRUE),
+      land_lon = weighted.mean(lon, landed_weight_lbs, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Processing weighted centroid by pounds
+  proc_centroids <- proc_dat %>%
+    group_by(specific_species, year) %>%
+    summarise(
+      proc_lat = weighted.mean(lat, pounds, na.rm = TRUE),
+      proc_lon = weighted.mean(lon, pounds, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Distance
+  mismatch <- land_centroids %>%
+    full_join(proc_centroids, by = c("specific_species","pacfin_year" = "year")) %>%
+    mutate(
+      distance_km = distHaversine(
+        cbind(land_lon, land_lat),
+        cbind(proc_lon, proc_lat)
+      ) / 1000
+    )
+  
+  # Plot
+  ggplot(mismatch, aes(x = pacfin_year, y = distance_km)) +
+    geom_line(color = "royalblue4", linewidth = 0.75) +
+    geom_point() +
+    geom_smooth(method = "lm", linetype = "dashed") +
+    labs(
+      title = paste0(species_name_input, " Processing–Landings Centroid Mismatch"),
+      x = "Year",
+      y = "Distance (km)"
+    ) +
+    xlim(1980, 2025) +
+    scale_y_continuous(limits = c(0, NA)) +
+    theme_minimal(base_size = 13)
+}
+
+
+groundfish_centroid <- plot_gf_mismatch("GROUNDFISH")
+ggsave(here("plots/presentation/12-2/groundfish_centroid.png"), groundfish_centroid, width = 12, height = 8, units = "in")
+```
+
+
+
+
+
