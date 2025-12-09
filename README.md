@@ -61,5 +61,4 @@ Collects annual economic information from vessels, first receivers, processors, 
 
 ## Acknowledgments
 
-This work is part of the [Future Seas III](https://cpo.noaa.gov/funded_projects/future-seas-iii-ensuring-resilience-and-adaptive-capacity-of-california-current-system-fisheries-under-climate-driven-ecosystem-shifts/) project:
-“Ensuring resilience and adaptive capacity of California Current System fisheries under climate-driven ecosystem shifts”
+This work is part of the [Future Seas III](https://cpo.noaa.gov/funded_projects/future-seas-iii-ensuring-resilience-and-adaptive-capacity-of-california-current-system-fisheries-under-climate-driven-ecosystem-shifts/) project.
