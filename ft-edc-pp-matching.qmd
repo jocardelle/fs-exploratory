@@ -169,5 +169,3 @@ edc_pp_match_2 <- ft_edc_pp_2 %>%
 n_distinct(edc_pp_match$dealer_num)
 n_distinct(edc_pp_match_2$dealer_num)
 ```
-
-

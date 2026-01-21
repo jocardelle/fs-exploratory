@@ -1,6 +1,14 @@
 ---
 title: "processing_landing_locations"
-format: html
+date: last-modified
+execute: 
+  warning: false
+  message: false
+format:
+  html:
+    code-fold: true
+    code-summary: "Show the code"
+    toc: true
 editor_options: 
   chunk_output_type: console
 ---
@@ -39,6 +47,35 @@ port_shapes <- readRDS(here("data/IOPAC_shapefiles.RDS"))
 bls <- read_csv(here("data/bls_2023_employment.csv"))
 ```
 
+
+
+### New column for groundfish and albacore
+```{r}
+# Add new column for groundfish and albacore
+groundfish <- c("ROCKFISH", "FLOUNDER", "COD", "SKATES", "SOLE", "THORNYHEAD", "SABLEFISH")
+
+pp <- pp %>% 
+  mutate(
+    specific_species = case_when(
+      str_detect(product, str_c(groundfish, collapse = "|")) ~ "GROUNDFISH",
+      str_detect(product, "ALBACORE") ~ "ALBACORE",
+      TRUE ~ NA_character_
+    )
+  )
+
+ft_species <- ft_species %>% 
+   mutate(
+    specific_species = case_when(
+      str_detect(pacfin_species_common_name, str_c(groundfish, collapse = "|")) ~ "GROUNDFISH",
+      str_detect(pacfin_species_common_name, "ALBACORE") ~ "ALBACORE",
+      TRUE ~ NA_character_
+    )
+  )
+   
+
+```
+
+
 # Landing vs Processing timeseries
 Here we are going to look at specific species pounds being landed vs processed over time.
 
@@ -59,7 +96,7 @@ ft_sardine_lb <- ft_sardine %>%
   summarise(poundage = sum(landed_weight_lbs))
 
 
-ggplot() +
+sardine_ts <- ggplot() +
   geom_line(data = pp_sardine_lb, aes (x = year, y = poundage, color = "Processed Products")) +
   geom_line(data = ft_sardine_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
   scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
@@ -70,6 +107,9 @@ ggplot() +
   ylab("Total Weight (lbs)") +
   theme_minimal() +
   theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/sardine_timeseries.png"), sardine_ts)
+sardine_ts
 ```
 
 ### Salmon
@@ -89,7 +129,7 @@ ft_salmon_lb <- ft_salmon %>%
   summarise(poundage = sum(landed_weight_lbs))
 
 
-ggplot() +
+salmon_ts <- ggplot() +
   geom_line(data = pp_salmon_lb, aes (x = year, y = poundage, color = "Processed Products")) +
   geom_line(data = ft_salmon_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
   scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
@@ -99,6 +139,9 @@ ggplot() +
   ylab("Total Weight (lbs)") +
   theme_minimal() +
   theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/salmon_timeseries.png"), salmon_ts)
+salmon_ts
 ```
 
 ### Hake
@@ -118,7 +161,7 @@ ft_hake_lb <- ft_hake %>%
   summarise(poundage = sum(landed_weight_lbs))
 
 
-ggplot() +
+hake_ts <- ggplot() +
   geom_line(data = pp_hake_lb, aes (x = year, y = poundage, color = "Processed Products")) +
   geom_line(data = ft_hake_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
   scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
@@ -128,6 +171,9 @@ ggplot() +
   ylab("Total Weight (lbs)") +
   theme_minimal() +
   theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/hake_timeseries.png"), hake_ts)
+hake_ts
 ```
 
 ### Tuna
@@ -147,9 +193,9 @@ ft_tuna_lb <- ft_tuna %>%
   summarise(poundage = sum(landed_weight_lbs))
 
 
-ggplot() +
+tuna_ts <- ggplot() +
   geom_line(data = pp_tuna_lb, aes (x = year, y = poundage, color = "Processed Products")) +
-  geom_line(data = ft_hake_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  geom_line(data = ft_tuna_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
   scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
   scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
   labs(title = "Tuna Landed and Processed") +
@@ -157,8 +203,107 @@ ggplot() +
   ylab("Total Weight (lbs)") +
   theme_minimal() +
   theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/tuna_timeseries.png"), tuna_ts)
+tuna_ts
 ```
 
+### Squid
+```{r}
+pp_squid <- pp %>% 
+  filter(product_general == "SQUID")
+
+pp_squid_lb <- pp_squid %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_squid <- ft_species %>% 
+  filter(product_general == "SQUID")
+
+ft_squid_lb <- ft_squid %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+squid_ts <- ggplot() +
+  geom_line(data = pp_squid_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_squid_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title = "Squid Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/squid_timeseries.png"), squid_ts)
+squid_ts
+```
+
+
+### Crab
+```{r}
+pp_crab <- pp %>% 
+  filter(product_general == "CRAB")
+
+pp_crab_lb <- pp_crab %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_crab <- ft_species %>% 
+  filter(product_general == "CRAB")
+
+ft_crab_lb <- ft_crab %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+crab_ts <- ggplot() +
+  geom_line(data = pp_crab_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_crab_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title = "Crab Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/crab_timeseries.png"), crab_ts)
+crab_ts
+```
+
+### Groundfish
+```{r}
+pp_gf <- pp %>% 
+  filter(specific_species == "GROUNDFISH")
+
+pp_gf_lb <- pp_gf %>% 
+  group_by(year) %>% 
+  summarise(poundage = sum(pounds))
+
+ft_gf <- ft_species %>% 
+  filter(specific_species == "GROUNDFISH")
+
+ft_gf_lb <- ft_gf %>% 
+  group_by(pacfin_year) %>% 
+  summarise(poundage = sum(landed_weight_lbs))
+
+
+gf_ts <- ggplot() +
+  geom_line(data = pp_gf_lb, aes (x = year, y = poundage, color = "Processed Products")) +
+  geom_line(data = ft_gf_lb, aes(x = pacfin_year, y = poundage, color = "Fish Tickets")) +
+  scale_color_manual(values = c("Processed Products" = "cornflowerblue", "Fish Tickets" = "firebrick")) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title = "Groundfish Landed and Processed") +
+  xlab("Year") +
+  ylab("Total Weight (lbs)") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+ggsave(here("plots/presentation/12-2/gf_timeseries.png"), gf_ts)
+gf_ts
+```
 
 
 # Landing vs Processing Locations
@@ -423,6 +568,7 @@ plot_fish_decades_faceted <- function(species_name, decades_list) {
 
 ## Species Location Plots
 ```{r}
+#| fig-dim: c(14, 12)
 salmon <- plot_fish_decades_faceted(
   "SALMON",
   decades_list = list(
@@ -432,6 +578,8 @@ salmon <- plot_fish_decades_faceted(
     c(2010,2019)
   )
 )
+
+salmon
 
 ggsave(here("plots/presentation/12-2/salmon_land_proc.png"), salmon, width = 14, height = 12, units = "in")
 
@@ -444,6 +592,9 @@ sardine <- plot_fish_decades_faceted(
     c(2010,2019)
   )
 )
+
+sardine
+
 ggsave(here("plots/presentation/12-2/sardine_land_proc.png"), sardine, width = 14, height = 12, units = "in")
 
 hake <- plot_fish_decades_faceted(
@@ -455,6 +606,8 @@ hake <- plot_fish_decades_faceted(
     c(2010,2019)
   )
 )
+
+hake
 
 ggsave(here("plots/presentation/12-2/hake_land_proc.png"), hake, width = 14, height = 12, units = "in")
 
@@ -468,6 +621,8 @@ tuna <- plot_fish_decades_faceted(
   )
 )
 
+tuna
+
 ggsave(here("plots/presentation/12-2/tuna_land_proc.png"), tuna, width = 14, height = 12, units = "in")
 
 crab <- plot_fish_decades_faceted(
@@ -479,6 +634,8 @@ crab <- plot_fish_decades_faceted(
     c(2010,2019)
   )
 )
+
+crab
 
 ggsave(here("plots/presentation/12-2/crab_land_proc.png"), crab, width = 14, height = 12, units = "in")
 
@@ -492,34 +649,9 @@ squid <- plot_fish_decades_faceted(
   )
 )
 
+squid
+
 ggsave(here("plots/presentation/12-2/squid_land_proc.png"), squid, width = 14, height = 12, units = "in")
-```
-
-
-### New column for groundfish and albacore
-```{r}
-# Add new column for groundfish and albacore
-groundfish <- c("ROCKFISH", "FLOUNDER", "COD", "SKATES", "SOLE", "THORNYHEAD", "SABLEFISH")
-
-pp <- pp %>% 
-  mutate(
-    specific_species = case_when(
-      str_detect(product, str_c(groundfish, collapse = "|")) ~ "GROUNDFISH",
-      str_detect(product, "ALBACORE") ~ "ALBACORE",
-      TRUE ~ NA_character_
-    )
-  )
-
-ft_species <- ft_species %>% 
-   mutate(
-    specific_species = case_when(
-      str_detect(pacfin_species_common_name, str_c(groundfish, collapse = "|")) ~ "GROUNDFISH",
-      str_detect(pacfin_species_common_name, "ALBACORE") ~ "ALBACORE",
-      TRUE ~ NA_character_
-    )
-  )
-   
-
 ```
 
 
@@ -611,27 +743,35 @@ plot_mismatch <- function(species_name_input) {
 ```{r}
 salmon_centroid <- plot_mismatch("SALMON")
 ggsave(here("plots/presentation/12-2/salmon_centroid.png"), salmon_centroid, width = 12, height = 8, units = "in")
+salmon_centroid
 
 sardine_centroid <- plot_mismatch("SARDINE")
 ggsave(here("plots/presentation/12-2/sardine_centroid.png"), sardine_centroid, width = 12, height = 8, units = "in")
+sardine_centroid
 
 hake_centroid <- plot_mismatch("HAKE")
 ggsave(here("plots/presentation/12-2/hake_centroid.png"), hake_centroid, width = 12, height = 8, units = "in")
+hake_centroid
 
 tuna_centroid <- plot_mismatch("TUNA")
 ggsave(here("plots/presentation/12-2/tuna_centroid.png"), tuna_centroid, width = 12, height = 8, units = "in")
+tuna_centroid
 
 squid_centroid <- plot_mismatch("SQUID")
 ggsave(here("plots/presentation/12-2/squid_centroid.png"), squid_centroid, width = 12, height = 8, units = "in")
+squid_centroid
 
 crab_centroid <- plot_mismatch("CRAB")
 ggsave(here("plots/presentation/12-2/crab_centroid.png"), crab_centroid, width = 12, height = 8, units = "in")
+crab_centroid
 ```
 
 # Groundfish
 
 ### Groundfish processing vs landings locations
 ```{r}
+#| fig-dim: c(8, 6)
+
 plot_gf_decades_faceted <- function(species_name, decades_list) {
   
   # Port order & labels
@@ -757,8 +897,22 @@ groundfish <- plot_gf_decades_faceted(
   )
 )
 
+groundfish
 
 ggsave(here("plots/presentation/12-2/groundfish_land_proc.png"), groundfish, width = 14, height = 12, units = "in")
+
+albacore <- plot_gf_decades_faceted(
+  "ALBACORE",
+  decades_list = list(
+    c(1981,1989),
+    c(1990,1999),
+    c(2000,2009),
+    c(2010,2019)
+  )
+)
+
+albacore
+ggsave(here("plots/1_13_update/albacore_land_proc.png"), albacore, width = 14, height = 12, units = "in")
 ```
 
 
@@ -820,10 +974,310 @@ plot_gf_mismatch <- function(species_name_input) {
 
 
 groundfish_centroid <- plot_gf_mismatch("GROUNDFISH")
+
+groundfish_centroid
+
 ggsave(here("plots/presentation/12-2/groundfish_centroid.png"), groundfish_centroid, width = 12, height = 8, units = "in")
 ```
 
 
 
+# Latitude Analysis
 
+```{r}
+# Ft_species_coords has fish ticket coordinates
+# pp has coords
+# both have product_general
+
+
+
+ft_lat <- ft_species_coords %>% 
+  group_by(pacfin_year, product_general) %>% 
+  summarise(weight_lat = weighted.mean(lat, w = landed_weight_lbs, na.rm = TRUE)) %>% 
+  rename(year = pacfin_year) %>% 
+  mutate(dataset = "fish tickets")
+
+pp_lat <- pp %>% 
+  group_by(year, product_general) %>% 
+  summarise(weight_lat = weighted.mean(lat, w = pounds, na.rm = TRUE)) %>% 
+  mutate(dataset = "processed products")
+
+
+latitudes <- rbind(ft_lat, pp_lat)
+
+salmon_lat <- ft_lat %>% 
+  filter(product_general == "SALMON") %>% 
+  select(year, lat_ft = weight_lat) %>% 
+  left_join(
+    pp_lat %>% 
+      filter(product_general == "SALMON") %>% 
+      select(year, lat_pp = weight_lat),
+    by = "year"
+  )
+
+
+ggplot(salmon_lat) +
+  geom_segment(aes(x = year, xend = year, y = lat_ft, yend = lat_pp),
+               color = "#aeb6bf",
+               size = 2,
+               alpha = 0.5) +
+  geom_point(aes(x = year, y = lat_ft),color = "firebrick", size = 4, show.legend = TRUE) +
+  geom_point(aes(x = year, y = lat_pp), color = "cornflowerblue", size = 4, show.legend = TRUE) +
+  theme_minimal()
+```
+
+## Function for dumbbell plot
+```{r}
+plot_latitudes <- function(species_name) {
+  species_lat <- ft_lat %>% 
+  filter(product_general == species_name) %>% 
+  select(year, lat_ft = weight_lat) %>% 
+  left_join(
+    pp_lat %>% 
+      filter(product_general == species_name) %>% 
+      select(year, lat_pp = weight_lat),
+    by = "year"
+  )
+
+
+ggplot(species_lat) +
+  geom_segment(aes(x = year, xend = year, y = lat_ft, yend = lat_pp),
+               color = "#aeb6bf",
+               size = 2,
+               alpha = 0.5) +
+  geom_point(aes(x = year, y = lat_ft),color = "firebrick", size = 4, show.legend = TRUE) +
+  geom_point(aes(x = year, y = lat_pp), color = "cornflowerblue", size = 4, show.legend = TRUE) +
+  ylim(32, 48) +
+  labs(title = paste0(species_name, " Processing & Landings Latitude"),
+       x = "Year",
+       y = "Latitude") +
+       theme_minimal()
+
+}
+
+```
+
+```{r}
+plot_latitudes("SALMON")
+
+plot_latitudes("TUNA")
+
+plot_latitudes("SARDINE")
+
+plot_latitudes("HAKE")
+
+plot_latitudes("SQUID")
+
+plot_latitudes("CRAB")
+```
+
+
+### Groundfish Latitudes
+```{r}
+ft_lat_gf <- ft_species_coords %>% 
+  group_by(pacfin_year, specific_species) %>% 
+  summarise(weight_lat = weighted.mean(lat, w = landed_weight_lbs, na.rm = TRUE)) %>% 
+  rename(year = pacfin_year) %>% 
+  mutate(dataset = "fish tickets")
+
+pp_lat_gf <- pp %>% 
+  group_by(year, specific_species) %>% 
+  summarise(weight_lat = weighted.mean(lat, w = pounds, na.rm = TRUE)) %>% 
+  mutate(dataset = "processed products")
+
+
+plot_latitudes_gf <- function(species_name) {
+  species_lat <- ft_lat_gf %>% 
+  filter(specific_species == species_name) %>% 
+  select(year, lat_ft = weight_lat) %>% 
+  left_join(
+    pp_lat_gf %>% 
+      filter(specific_species == species_name) %>% 
+      select(year, lat_pp = weight_lat),
+    by = "year"
+  )
+
+
+ggplot(species_lat) +
+  geom_segment(aes(x = year, xend = year, y = lat_ft, yend = lat_pp),
+               color = "#aeb6bf",
+               size = 2,
+               alpha = 0.5) +
+  geom_point(aes(x = year, y = lat_ft),color = "firebrick", size = 4, show.legend = TRUE) +
+  geom_point(aes(x = year, y = lat_pp), color = "cornflowerblue", size = 4, show.legend = TRUE) +
+  ylim(32, 48) +
+  labs(title = paste0(species_name, " Processing & Landings Latitude"),
+       x = "Year",
+       y = "Latitude") +
+       theme_minimal()
+
+}
+
+plot_latitudes_gf("GROUNDFISH")
+```
+
+
+## Albacore latitudes
+```{r}
+ft_lat_gf <- ft_species_coords %>% 
+  group_by(pacfin_year, specific_species) %>% 
+  summarise(weight_lat = weighted.mean(lat, w = landed_weight_lbs, na.rm = TRUE)) %>% 
+  rename(year = pacfin_year) %>% 
+  mutate(dataset = "fish tickets")
+
+pp_lat_gf <- pp %>% 
+  group_by(year, specific_species) %>% 
+  summarise(weight_lat = weighted.mean(lat, w = pounds, na.rm = TRUE)) %>% 
+  mutate(dataset = "processed products")
+
+
+plot_latitudes_gf <- function(species_name) {
+  species_lat <- ft_lat_gf %>% 
+  filter(specific_species == species_name) %>% 
+  select(year, lat_ft = weight_lat) %>% 
+  left_join(
+    pp_lat_gf %>% 
+      filter(specific_species == species_name) %>% 
+      select(year, lat_pp = weight_lat),
+    by = "year"
+  )
+
+
+ggplot(species_lat) +
+  geom_segment(aes(x = year, xend = year, y = lat_ft, yend = lat_pp),
+               color = "#aeb6bf",
+               size = 2,
+               alpha = 0.5) +
+  geom_point(aes(x = year, y = lat_ft),color = "firebrick", size = 4, show.legend = TRUE) +
+  geom_point(aes(x = year, y = lat_pp), color = "cornflowerblue", size = 4, show.legend = TRUE) +
+  ylim(32, 48) +
+  labs(title = paste0(species_name, " Processing & Landings Latitude"),
+       x = "Year",
+       y = "Latitude") +
+       theme_minimal()
+
+}
+
+plot_latitudes_gf("ALBACORE")
+```
+
+
+
+THINGS TO NOTE: pp uses weight after processing. pp lat and lon off zip code but ft off iopac port group
+
+
+```{r}
+#Albacore weighted centroids
+
+# Landings (fish tickets)
+ft_centroids <- ft_species_coords %>% 
+  filter(specific_species == "ALBACORE",
+         pacfin_year %in% c(1985, 2015)) %>% 
+  group_by(pacfin_year) %>% 
+  summarise(
+    lon = weighted.mean(lon, w = landed_weight_lbs, na.rm = TRUE),
+    lat = weighted.mean(lat, w = landed_weight_lbs, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% 
+  mutate(
+    dataset = "Landings",
+    year = pacfin_year
+  )
+
+# Processing (processed products)
+pp_centroids <- pp %>% 
+  filter(specific_species == "ALBACORE",
+         year %in% c(1985, 2015)) %>% 
+  group_by(year) %>% 
+  summarise(
+    lon = weighted.mean(lon, w = pounds, na.rm = TRUE),
+    lat = weighted.mean(lat, w = pounds, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% 
+  mutate(dataset = "Processing")
+albacore_centroids <- bind_rows(ft_centroids, pp_centroids)
+albacore_centroids_sf <- st_as_sf(
+  albacore_centroids,
+  coords = c("lon", "lat"),
+  crs = 4326
+)
+wc_states <- iopac_sf %>% 
+  st_transform(4326)
+wc_bbox <- st_bbox(c(
+  xmin = -125, xmax = -117,
+  ymin = 32, ymax = 49
+), crs = st_crs(4326))
+
+
+
+ggplot() +
+  geom_sf(data = wc_states, fill = "gray95", color = "gray60", linewidth = 0.3) +
+  
+  geom_sf(
+    data = albacore_centroids_sf,
+    aes(color = dataset, shape = factor(year)),
+    size = 4
+  ) +
+  
+  coord_sf(
+    xlim = c(-125, -117),
+    ylim = c(32, 49),
+    expand = FALSE
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Landings" = "firebrick",
+      "Processing" = "cornflowerblue"
+    )
+  ) +
+  
+  labs(
+    title = "Albacore Processing vs Landings Centroids",
+    subtitle = "Weighted by pounds, 1985 and 2015",
+    color = NULL,
+    shape = "Year"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank()
+  )
+
+ggplot() +
+  geom_sf(data = wc_states, fill = "gray95", color = "gray60", linewidth = 0.3) +
+  
+  geom_sf(
+    data = albacore_centroids_sf,
+    aes(color = dataset),
+    size = 4
+  ) +
+  
+  facet_wrap(~ year) +
+  
+  coord_sf(
+    xlim = c(-125, -117),
+    ylim = c(32, 49),
+    expand = FALSE
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Landings" = "firebrick",
+      "Processing" = "cornflowerblue"
+    )
+  ) +
+  
+  labs(
+    title = "Albacore Processing vs Landings Centroids",
+    subtitle = "Weighted by pounds"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank()
+  )
+```
 

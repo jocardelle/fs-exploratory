@@ -18,13 +18,14 @@ This repository explores historical and current patterns in U.S. West Coast fish
 -   `ft-edc-pp-matching.qmd` - Matches processor/dealers from pacFIN, EDC, and Processed Products.
 -   `pacfin_db_pull.R` - Pulls Pacfin Comprehensive_FT data
 -   `processing_landing_locations.qmd` - Examines how the locations where fish are landed compare to the locations where they are processed and how those relationships change over time.
+-   `imports-exports.qmd` - Looks at imports/exports, landing, and processing of single species.
 -   `functions/assign_county_sf.R`- Loads county shapefiles, merges them with provided data, and transforms CRS
 -   `functions/assign_county.R` - Adds county information to data frames using ZIP codes
 
 ## Repository Structure
 
 ```         
-|── marine-aquaculture 
+|── fs-exporatory
 |└── README.md
 |└── functions/
 |  └── assign_county_sf.R
@@ -33,7 +34,8 @@ This repository explores historical and current patterns in U.S. West Coast fish
 |└── processed-products-eda.qmd
 |└── fish-ticket-pp-comparison.qmd 
 |└── ft-edc-pp-matching.qmd
-|└── processing_landing_locations.qmd  
+|└── processing_landing_locations.qmd
+|└── imports-exports.qmd 
 |└── pacfin_db_pull.R  
 ```
 

@@ -69,6 +69,8 @@ state_avg_emp
 # Employment Map
 ```{r}
 avg_emp_city <- pp_employment %>% 
+  rename(longitude = lon,
+         latitude = lat) %>% 
   group_by(longitude, latitude, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE))
 
@@ -123,46 +125,46 @@ avg_emp_map
 # 1970-1979
 avg_emp_city_70 <- pp_employment %>% 
   filter(year <= 1979) %>% 
-  group_by(longitude, latitude, plant_city) %>% 
+  group_by(lon, lat, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
-  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
-  st_as_sf(coords = c("longitude", "latitude"),
+  filter(!is.na(lon) & !is.na(lat)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("lon", "lat"),
            crs = 4326)
 
 # 1980-1989
 avg_emp_city_80 <- pp_employment %>% 
   filter(year >= 1980 & year <= 1989) %>% 
-  group_by(longitude, latitude, plant_city) %>% 
+  group_by(lon, lat, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
-  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
-  st_as_sf(coords = c("longitude", "latitude"),
+  filter(!is.na(lon) & !is.na(lat)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("lon", "lat"),
            crs = 4326)
 
 # 1990-1999
 avg_emp_city_90 <- pp_employment %>% 
   filter(year >= 1990 & year <= 1999) %>% 
-  group_by(longitude, latitude, plant_city) %>% 
+  group_by(lon, lat, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
-  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
-  st_as_sf(coords = c("longitude", "latitude"),
+  filter(!is.na(lon) & !is.na(lat)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("lon", "lat"),
            crs = 4326)
 
 # 2000-2009
 avg_emp_city_00 <- pp_employment %>% 
   filter(year >= 2000 & year <= 2009) %>% 
-  group_by(longitude, latitude, plant_city) %>% 
+  group_by(lon, lat, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
-  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
-  st_as_sf(coords = c("longitude", "latitude"),
+  filter(!is.na(lon) & !is.na(lat)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("lon", "lat"),
            crs = 4326)
 
 # 2010-2019
 avg_emp_city_10 <- pp_employment %>% 
   filter(year >= 2010 & year <= 2019) %>% 
-  group_by(longitude, latitude, plant_city) %>% 
+  group_by(lon, lat, plant_city) %>% 
   summarise(avg_employees = mean(employees, na.rm = TRUE)) %>% 
-  filter(!is.na(longitude) & !is.na(latitude)) %>% # Need to remove NAs or st_as_sf wont work
-  st_as_sf(coords = c("longitude", "latitude"),
+  filter(!is.na(lon) & !is.na(lat)) %>% # Need to remove NAs or st_as_sf wont work
+  st_as_sf(coords = c("lon", "lat"),
            crs = 4326)
 
 # Combine

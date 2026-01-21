@@ -103,11 +103,6 @@ ft_dealerid$pp_idnum <- as.numeric(ft_dealerid$pp_idnum)
 pp_dealernum <- inner_join(pp_unique, ft_dealernum, by = "pp_idnum")
 pp_dealerid <- inner_join(pp_unique, ft_dealerid, by = "pp_idnum")
 
-sb_abalone_pp <- processors %>% 
-  filter(company == "SANTA BARBARA ABALONE")
-
-sb_abalone_pacfin <- pacfin_dealers %>%
-      filter(str_detect(dealer_name, "SANTA BARBARA ABALONE"))
 ```
 
 ```{r}
@@ -124,7 +119,7 @@ general_products <- c(
   "SABLEFISH" = "SABLEFISH",
   "SQUID" = "SQUID",
   "SHRIMP" = "SHRIMP",
-  "BONITO" = "TUNA",
+  "BONITO" = "BONITO",
   "COD" = "COD",
   "CUCUMBER" = "SEA CUCUMBER",
   "FLOUNDER" = "FLOUNDER",
@@ -321,7 +316,7 @@ sardine <- pp_products %>%
   summarise(poundage = sum(pounds),
             revenue = sum(dollars))
 
-sardine$region <- factor(sardine$region, levels = region_location)
+#sardine$region <- factor(sardine$region, levels = region_location)
 
 pp_sardine <- ggplot(sardine, aes(x = year, y = poundage, colour = region)) +
   geom_line(size = 1.25) +
@@ -363,7 +358,7 @@ ft_sardine_pounds <- ft_sardine %>%
   summarise(poundage = sum(landed_weight_lbs),
             revenue = sum(revenue))
 
-ft_sardine_pounds$region <- factor(ft_sardine_pounds$region, levels = region_location)
+#ft_sardine_pounds$region <- factor(ft_sardine_pounds$region, levels = region_location)
 
 ft_sardine <- ggplot(ft_sardine_pounds, aes(x = pacfin_year, y = poundage, colour = region)) +
   geom_line(size = 1.25) +

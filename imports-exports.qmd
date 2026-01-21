@@ -1,0 +1,1251 @@
+---
+title: "imports-exports"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+Lets look at imports vs exports vs processing vs landings on the West Coast for albacore and sardine.
+
+# Setup
+```{r}
+# Import libraries
+library(tidyverse)
+library(here)
+library(tidyr)
+library(janitor)
+library(stringr)
+library(scales)
+library(plotly)
+```
+
+
+```{r}
+# Data
+# Import and export data
+sardine_ie_all <- read_csv(here("data/imports-exports/sardine-annual-trade-year-customs-district.csv")) %>% clean_names()
+
+albacore_ie_all <- read_csv(here("data/imports-exports/albacore-annual-trade-year-customs-district.csv")) %>% clean_names()
+
+# Processed Products
+pp <- read_csv(here("data/processed_products/cleaned/wc_products_location.csv"))
+
+# Fish tickets
+ft <- read_csv(here("data/pacfin/pacfin_products_general.csv"))
+
+```
+
+
+
+
+# Clean
+## Imports, Exports, and Re-exports
+```{r}
+# Split customs district into city/state
+sardine_ie_all <- sardine_ie_all %>% 
+  separate(col = us_customs_district,
+           into = c("customs_city", "customs_state"),
+           sep = ", ")
+
+albacore_ie_all <- albacore_ie_all %>% 
+  separate(col = us_customs_district,
+           into = c("customs_city", "customs_state"),
+           sep = ", ")
+
+# Filter to CA, WA, OR and convert kg to lb
+sardine_ie <- sardine_ie_all %>% 
+  filter(customs_state %in% c("CA", "OR", "WA")) %>% 
+  mutate(pounds = volume_kg * 2.20462)
+
+albacore_ie <- albacore_ie_all %>% 
+  filter(customs_state %in% c("CA", "OR", "WA")) %>% 
+  mutate(pounds = volume_kg * 2.20462)
+
+# Make imports, exports different datasets
+sardine_imp <- sardine_ie %>% 
+  filter(source == "IMP")
+
+sardine_exp <- sardine_ie %>% 
+  filter(source == "EXP")
+
+albacore_imp <- albacore_ie %>% 
+  filter(source == "IMP")
+
+albacore_exp <- albacore_ie %>% 
+  filter(source == "EXP")
+
+```
+
+```{r}
+# Add state to ft
+ft <- ft %>% 
+  mutate(
+    state = case_when(
+      iopac_port_group %in% c("north_wa_coast", "puget_sound", "south_and_central_wa_coast") ~ "WA",
+      iopac_port_group %in% c( "astoria", "columbia_river", "tillamook", "newport", "coos_bay", "brookings") ~ "OR",
+      iopac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay", "san_francisco", "monterey", "morro_bay", "san_francisco", "monterey", "morro_bay", "santa_barbara", "los_angeles", "san_diego") ~ "CA"
+      # iopac_port_group %in% c("crescent_city", "eureka", "fort_bragg", "bodega_bay") ~ "Northern CA",
+      # iopac_port_group %in% c("san_francisco", "monterey", "morro_bay") ~ "Central CA",
+      # iopac_port_group %in% c("santa_barbara", "los_angeles", "san_diego") ~ "Southern CA"
+    )
+  )
+
+# Filter processed products to albacore and sardine
+albacore_pp <- pp %>% 
+  filter(str_detect(product, "ALBACORE"))
+
+sardine_pp <- pp %>% 
+  filter(str_detect(product, "SARDINE"))
+
+crab_pp <- pp %>% 
+  filter(str_detect(product, "DUNGENESS"))
+
+# Filter landings to albacore and sardine
+albacore_ft <- ft %>% 
+  filter(str_detect(pacfin_species_common_name, "ALBACORE"))
+
+sardine_ft <- ft %>% 
+  filter(str_detect(pacfin_species_common_name, "SARDINE"))
+
+crab_ft <- ft %>% 
+  filter(str_detect(pacfin_species_common_name, "DUNGENESS"))
+
+print(unique(sardine_pp$product))
+print(unique(albacore_pp$product))
+
+```
+
+
+# Plot all together
+```{r}
+# Processed products albacore
+yearly_pp_albacore <- albacore_pp %>% 
+  group_by(year, plant_state_abrv) %>% 
+  summarise(weight = sum(pounds)) %>% 
+  mutate(data = "processing") %>% 
+  rename(state = plant_state_abrv)
+
+# Processed products sardine
+yearly_pp_sardine <- sardine_pp %>% 
+  group_by(year, plant_state_abrv) %>% 
+  summarise(weight = sum(pounds)) %>% 
+  mutate(data = "processing") %>% 
+  rename(state = plant_state_abrv)
+
+# Fish tickets albacore
+yearly_ft_albacore <- albacore_ft %>% 
+  group_by(pacfin_year, state) %>% 
+  summarise(weight = sum(round_weight_lbs)) %>% 
+  mutate(data = "landings") %>% 
+  rename(year = pacfin_year)
+
+# Fish tickets albacore
+yearly_ft_sardine <- sardine_ft %>% 
+  group_by(pacfin_year, state) %>% 
+  summarise(weight = sum(round_weight_lbs)) %>% 
+  mutate(data = "landings") %>% 
+  rename(year = pacfin_year)
+
+# Imports albacore
+yearly_imp_albacore <- albacore_imp %>% 
+  group_by(year, customs_state) %>% 
+  summarise(weight = sum(pounds)) %>% 
+  mutate(data = "imports") %>% 
+  rename(state = customs_state)
+
+# Imports sardine
+yearly_imp_sardine <- sardine_imp %>% 
+  group_by(year, customs_state) %>% 
+  summarise(weight = sum(pounds)) %>% 
+  mutate(data = "imports") %>% 
+  rename(state = customs_state)
+
+# exports albacore
+yearly_exp_albacore <- albacore_exp %>% 
+  group_by(year, customs_state) %>% 
+  summarise(weight = sum(pounds)) %>% 
+  mutate(data = "exports") %>% 
+  rename(state = customs_state)
+
+# Exports sardine
+yearly_exp_sardine <- sardine_exp %>% 
+  group_by(year, customs_state) %>% 
+  summarise(weight = sum(pounds)) %>% 
+  mutate(data = "exports") %>% 
+  rename(state = customs_state)
+`
+
+# Combine
+albacore <- rbind(yearly_pp_albacore, yearly_ft_albacore, yearly_imp_albacore, yearly_exp_albacore) 
+
+albacore <- albacore %>% 
+  group_by(state, data) %>% 
+  complete(year = seq(min(year), max(year)),
+           fill = list(weight = 0)) %>% 
+  ungroup()
+
+albacore_wc <- albacore %>% 
+  group_by(year, data) %>% 
+  summarise(weight = sum(weight), .groups = "drop")
+
+sardine <- rbind(yearly_pp_sardine, yearly_ft_sardine, yearly_imp_sardine, yearly_exp_sardine)
+
+order <- c("processing", "exports", "imports", "landings")
+albacore$data <- factor(albacore$data, levels = order)
+sardine$data <- factor(sardine$data, levels = order)
+
+ggplot(albacore, aes(x = year, y = weight, color = data, group = data)) +
+  geom_line() +
+  xlim(1981, 2025) +
+  facet_wrap(~ state) +
+  scale_y_continuous(labels = label_number(scale_cut = (cut_si("")))) +
+  labs(title = "West Coast Albacore",
+       y = "Total Weight (lbs)",
+       x = "Year") +
+  theme_minimal()
+
+
+ggplot(sardine, aes(x = year, y = weight, color = data)) +
+  geom_line() +
+  xlim(1981, 2025) +
+  facet_wrap(~ state) +
+  scale_y_continuous(labels = label_number(scale_cut = (cut_si("")))) +
+  labs(title = "West Coast Sardine",
+       y = "Total Weight (lbs)",
+       x = "Year") +
+  theme_minimal()
+
+
+albacore_totals <- albacore %>% 
+  group_by(year, data) %>% 
+  summarise(weight = sum(weight))
+
+sardine_totals <- sardine %>% 
+  group_by(year, data) %>% 
+  summarise(weight = sum(weight))
+
+ggplot(albacore_totals, aes(x = year, y = weight, color = data)) +
+  geom_line() +
+  xlim(1981, 2025)  +
+  scale_y_continuous(labels = label_number(scale_cut = (cut_si("")))) +
+  labs(title = "West Coast Albacore",
+       y = "Total Weight (lbs)",
+       x = "Year") +
+  theme_minimal()
+
+sardine_imp_landings <-  
+ggplot(sardine_totals, aes(x = year, y = weight, color = data)) +
+  geom_line() +
+  xlim(1981, 2025) +
+  scale_fill_manual(values = c(
+    "processing" = "cornflowerblue",
+    "imports" = "red",
+    "exports" = "navyblue",
+    "landings" = "firebrick"
+  )) +
+  scale_y_continuous(labels = label_number(scale_cut = (cut_si("")))) +
+  labs(title = "West Coast Sardine",
+       y = "Total Weight (lbs)",
+       x = "Year") +
+  theme_minimal()
+
+# Area charts
+ggplot(albacore_totals, aes(x = year, y = weight, fill = data, group = data)) +
+  geom_area() +
+  xlim(1981, 2023) +
+  scale_y_continuous(labels = label_number(scale_cut = (cut_si("")))) +
+  scale_fill_manual(values = c(
+    "processing" = "cornflowerblue",
+    "imports" = "red",
+    "exports" = "navyblue",
+    "landings" = "firebrick"
+  )) +
+  ggtitle("West Coast Albacore") +
+  xlab("Year") +
+  ylab("Weight (lbs)") +
+  theme_minimal()
+
+ggplot(sardine_totals, aes(x = year, y = weight, fill = data, group = data)) +
+  geom_area() +
+  xlim(1981, 2023) +
+  scale_y_continuous(labels = label_number(scale_cut = (cut_si("")))) +
+  scale_fill_manual(values = c(
+    "processing" = "cornflowerblue",
+    "imports" = "red",
+    "exports" = "navyblue",
+    "landings" = "firebrick"
+  )) +
+  ggtitle("West Coast Albacore") +
+  xlab("Year") +
+  ylab("Weight (lbs)") +
+  theme_minimal()
+```
+
+
+# Function version
+```{r}
+port_state_lookup <- function(iopac_port_group) {
+  case_when(
+    iopac_port_group %in% c(
+      "north_wa_coast", "puget_sound", "south_and_central_wa_coast"
+    ) ~ "WA",
+    
+    iopac_port_group %in% c(
+      "astoria", "columbia_river", "tillamook",
+      "newport", "coos_bay", "brookings"
+    ) ~ "OR",
+    
+    iopac_port_group %in% c(
+      "crescent_city", "eureka", "fort_bragg", "bodega_bay",
+      "san_francisco", "monterey", "morro_bay",
+      "santa_barbara", "los_angeles", "san_diego"
+    ) ~ "CA",
+    
+    TRUE ~ NA_character_
+  )
+}
+
+
+wc_area_plot <- function(
+  product_names,   
+  pp,
+  ft,
+  start_year = 1981,
+  end_year = 2023
+) {
+
+  # Setup
+  product_regex <- regex(
+    paste(product_names, collapse = "|"),
+    ignore_case = TRUE
+  )
+
+  product_lower <- str_to_lower(product_names[1])
+
+  # Imports/ exports
+  ie <- read_csv(
+    here(
+      glue::glue(
+        "data/imports-exports/{product_lower}-annual-trade-year-customs-district.csv"
+      )
+    ),
+    show_col_types = FALSE
+  ) %>%
+    clean_names() %>%
+    separate(
+      us_customs_district,
+      into = c("customs_city", "customs_state"),
+      sep = ", "
+    ) %>%
+    filter(customs_state %in% c("CA", "OR", "WA")) %>%
+    mutate(pounds = volume_kg * 2.20462)
+
+  yearly_imp <- ie %>%
+    filter(source == "IMP") %>%
+    group_by(year, customs_state) %>%
+    summarise(weight = sum(pounds), .groups = "drop") %>%
+    mutate(data = "imports") %>%
+    rename(state = customs_state)
+
+  yearly_exp <- ie %>%
+    filter(source == "EXP") %>%
+    group_by(year, customs_state) %>%
+    summarise(weight = sum(pounds), .groups = "drop") %>%
+    mutate(data = "exports") %>%
+    rename(state = customs_state)
+
+
+  # Processed products
+  yearly_pp <- pp %>%
+    filter(str_detect(product, product_regex)) %>%
+    group_by(year, plant_state_abrv) %>%
+    summarise(weight = sum(pounds), .groups = "drop") %>%
+    mutate(data = "processing") %>%
+    rename(state = plant_state_abrv)
+
+
+  # Fish tickets
+  ft_wc <- ft %>%
+    mutate(
+      state = case_when(
+        iopac_port_group %in% c(
+          "north_wa_coast", "puget_sound", "south_and_central_wa_coast"
+        ) ~ "WA",
+
+        iopac_port_group %in% c(
+          "astoria", "columbia_river", "tillamook",
+          "newport", "coos_bay", "brookings"
+        ) ~ "OR",
+
+        iopac_port_group %in% c(
+          "crescent_city", "eureka", "fort_bragg", "bodega_bay",
+          "san_francisco", "monterey", "morro_bay",
+          "santa_barbara", "los_angeles", "san_diego"
+        ) ~ "CA",
+
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(!is.na(state))
+
+  yearly_ft <- ft_wc %>%
+    filter(str_detect(pacfin_species_common_name, product_regex)) %>%
+    group_by(pacfin_year, state) %>%
+    summarise(weight = sum(round_weight_lbs), .groups = "drop") %>%
+    mutate(data = "landings") %>%
+    rename(year = pacfin_year)
+
+
+  # Combine and complete years
+  combined <- bind_rows(
+    yearly_pp,
+    yearly_ft,
+    yearly_imp,
+    yearly_exp
+  ) %>%
+    group_by(state, data) %>%
+    complete(
+      year = seq(min(year), max(year)),
+      fill = list(weight = 0)
+    ) %>%
+    ungroup()
+
+  totals <- combined %>%
+    group_by(year, data) %>%
+    summarise(weight = sum(weight), .groups = "drop")
+
+  totals$data <- factor(
+    totals$data,
+    levels = c("processing", "exports", "imports", "landings")
+  )
+
+
+  # Area chart
+  p <- ggplot(
+    totals,
+    aes(x = year, y = weight, fill = data)
+  ) +
+    geom_area() +
+    xlim(start_year, end_year) +
+    scale_y_continuous(
+      labels = label_number(scale_cut = cut_si(""))
+    ) +
+    scale_fill_manual(values = c(
+      "processing" = "cornflowerblue",
+      "imports"    = "red",
+      "exports"    = "navyblue",
+      "landings"   = "firebrick"
+    )) +
+    labs(
+      title = paste("West Coast", str_to_title(product_names[1])),
+      x = "Year",
+      y = "Weight (lbs)",
+      fill = NULL
+    ) +
+    theme_minimal()
+
+  return(list(
+    totals = totals,
+    plot = p
+  ))
+}
+```
+
+
+```{r}
+# run function
+sardine <- wc_area_plot("SARDINE", pp, ft)
+sardine$plot
+
+albacore <- wc_area_plot("ALBACORE", pp, ft)
+albacore$plot
+
+squid <- wc_area_plot("SQUID", pp, ft)
+squid$plot
+
+pollock <- wc_area_plot("POLLOCK", pp, ft)
+pollock$plot
+
+hake <- wc_area_plot(c("HAKE","WHITING"), pp, ft)
+hake$plot
+```
+
+
+# Function for line graphs
+```{r}
+wc_line_plot <- function(
+  product_names,
+  pp,
+  ft,
+  start_year = 1981,
+  end_year = 2023
+) {
+
+# Setup
+    paste(product_names, collapse = "|"),
+    ignore_case = TRUE
+  )
+
+  product_lower <- str_to_lower(product_names[1])
+
+ 
+  # Imports/exports
+  ie <- read_csv(
+    here(
+      glue::glue(
+        "data/imports-exports/{product_lower}-annual-trade-year-customs-district.csv"
+      )
+    ),
+    show_col_types = FALSE
+  ) %>%
+    clean_names() %>%
+    separate(
+      us_customs_district,
+      into = c("customs_city", "customs_state"),
+      sep = ", "
+    ) %>%
+    filter(customs_state %in% c("CA", "OR", "WA")) %>%
+    mutate(pounds = volume_kg * 2.20462)
+
+  yearly_imp <- ie %>%
+    filter(source == "IMP") %>%
+    group_by(year, customs_state) %>%
+    summarise(weight = sum(pounds), .groups = "drop") %>%
+    mutate(data = "imports") %>%
+    rename(state = customs_state)
+
+  # yearly_exp <- ie %>%
+  #   filter(source == "EXP") %>%
+  #   group_by(year, customs_state) %>%
+  #   summarise(weight = sum(pounds), .groups = "drop") %>%
+  #   mutate(data = "exports") %>%
+  #   rename(state = customs_state)
+
+ 
+  # Processed products
+  yearly_pp <- pp %>%
+    filter(str_detect(product, product_regex)) %>%
+    group_by(year, plant_state_abrv) %>%
+    summarise(weight = sum(pounds), .groups = "drop") %>%
+    mutate(data = "processing") %>%
+    rename(state = plant_state_abrv)
+
+
+  # Fish tickets
+  ft_wc <- ft %>%
+    mutate(state = port_state_lookup(iopac_port_group)) %>%
+    filter(!is.na(state))
+
+  yearly_ft <- ft_wc %>%
+    filter(str_detect(pacfin_species_common_name, product_regex)) %>%
+    group_by(pacfin_year, state) %>%
+    summarise(weight = sum(round_weight_lbs), .groups = "drop") %>%
+    mutate(data = "landings") %>%
+    rename(year = pacfin_year)
+
+
+  # Combine years
+  combined <- bind_rows(
+    yearly_pp,
+    yearly_ft,
+    yearly_imp,
+    yearly_exp
+  ) %>%
+    group_by(state, data) %>%
+    complete(
+      year = seq(min(year), max(year)),
+      fill = list(weight = 0)
+    ) %>%
+    ungroup()
+
+  totals <- combined %>%
+    group_by(year, data) %>%
+    summarise(weight = sum(weight), .groups = "drop")
+
+  totals$data <- factor(
+    totals$data,
+    levels = c("processing", "exports", "imports", "landings")
+  )
+
+  # Line chart
+  p <- ggplot(
+    totals,
+    aes(x = year, y = weight, color = data)
+  ) +
+    geom_line(linewidth = 1.1) +
+    xlim(start_year, end_year) +
+    scale_y_continuous(
+      labels = label_number(scale_cut = cut_si(""))
+    ) +
+    scale_color_manual(values = c(
+      "processing" = "cornflowerblue",
+      "imports"    = "red",
+      "exports"    = "navyblue",
+      "landings"   = "firebrick"
+    )) +
+    labs(
+      title = paste("West Coast", str_to_title(product_names[1])),
+      x = "Year",
+      y = "Weight (lbs)",
+      color = NULL
+    ) +
+    theme_minimal()
+
+  return(list(
+    totals = totals,
+    plot = p
+  ))
+}
+```
+
+# Run line plots
+```{r}
+sardine_line <- wc_line_plot("SARDINE", pp, ft)
+sardine_line$plot
+
+albacore_line <- wc_line_plot("ALBACORE", pp, ft)
+albacore_line$plot
+
+squid_line <- wc_line_plot("SQUID", pp, ft)
+squid_line$plot
+
+pollock_line <- wc_line_plot("POLLOCK", pp, ft)
+pollock_line$plot
+
+hake_line <- wc_line_plot(c("HAKE", "WHITING"), pp, ft)
+hake_line$plot
+```
+
+
+## SEE HOW MUCH PP ACCOUNTS FOR
+```{r}
+# Keep only relevant data streams
+albacore_sub <- albacore_totals %>%
+  filter(data %in% c("imports", "landings", "processing"))
+
+# Total available supply (imports + landings)
+albacore_supply <- albacore_sub %>%
+  filter(data %in% c("imports", "landings")) %>%
+  group_by(year) %>%
+  summarise(supply = sum(weight), .groups = "drop")
+
+# Processing totals
+albacore_processing <- albacore_sub %>%
+  filter(data == "processing") %>%
+  select(year, processing = weight)
+
+# Combine for percent calculation
+albacore_share <- albacore_supply %>%
+  left_join(albacore_processing, by = "year") %>%
+  mutate(
+    processing = ifelse(is.na(processing), 0, processing),
+    pct_processed = 100 * processing / supply
+  )
+```
+
+```{r}
+ggplot() +
+  geom_area(
+    data = albacore_sub %>% filter(data %in% c("imports", "landings")),
+    aes(x = year, y = weight, fill = data),
+    alpha = 0.8
+  ) +
+  geom_line(
+    data = albacore_processing,
+    aes(x = year, y = processing),
+    color = "black",
+    linewidth = 1
+  ) +
+  scale_fill_manual(values = c(
+    "imports" = "firebrick",
+    "landings" = "navy"
+  )) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_si(""))) +
+  xlim(1981, 2025) +
+  labs(
+    title = "West Coast Albacore: Supply vs Processing",
+    subtitle = "Stacked Imports + Landings with Processing Overlay",
+    y = "Total Weight (lbs)",
+    x = "Year",
+    fill = "Source"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(albacore_share, aes(x = year, y = pct_processed)) +
+  geom_line(color = "black", linewidth = 1) +
+  geom_hline(yintercept = 100, linetype = "dashed", color = "gray60") +
+  scale_y_continuous(labels = percent_format(scale = 1)) +
+  xlim(1981, 2025) +
+  labs(
+    title = "Share of Albacore Supply Processed Domestically",
+    subtitle = "Processing as % of (Imports + Landings)",
+    y = "Percent of Supply Processed",
+    x = "Year"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot() +
+  geom_area(
+    data = albacore_sub %>% filter(data %in% c("imports", "landings")),
+    aes(x = year, y = weight, fill = data),
+    alpha = 0.8
+  ) +
+  geom_line(
+    data = albacore_processing,
+    aes(x = year, y = processing),
+    color = "black",
+    linewidth = 1
+  ) +
+  geom_line(
+    data = albacore_share,
+    aes(x = year, y = pct_processed * max(albacore_supply$supply) / 100),
+    color = "darkgreen",
+    linewidth = 1,
+    linetype = "dashed"
+  ) +
+  scale_y_continuous(
+    labels = label_number(scale_cut = cut_si("")),
+    sec.axis = sec_axis(
+      ~ . * 100 / max(albacore_supply$supply),
+      name = "Percent Processed",
+      labels = percent_format(scale = 1)
+    )
+  ) +
+  scale_fill_manual(values = c(
+    "imports" = "firebrick",
+    "landings" = "navy"
+  )) +
+  xlim(1981, 2025) +
+  labs(
+    title = "Albacore Supply and Processing Share",
+    y = "Weight (lbs)",
+    x = "Year",
+    fill = "Source"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+```{r}
+# Keep only relevant data streams
+sardine_sub <- sardine_totals %>%
+  filter(data %in% c("imports", "landings", "processing"))
+
+# Total available supply (imports + landings)
+sardine_supply <- sardine_sub %>%
+  filter(data %in% c("imports", "landings")) %>%
+  group_by(year) %>%
+  summarise(supply = sum(weight), .groups = "drop")
+
+# Processing totals
+sardine_processing <- sardine_sub %>%
+  filter(data == "processing") %>%
+  select(year, processing = weight)
+
+# Combine for percent calculation
+sardine_share <- sardine_supply %>%
+  left_join(sardine_processing, by = "year") %>%
+  mutate(
+    processing = ifelse(is.na(processing), 0, processing),
+    pct_processed = 100 * processing / supply
+  )
+```
+
+```{r}
+ggplot() +
+  geom_area(
+    data = sardine_sub %>% filter(data %in% c("imports", "landings")),
+    aes(x = year, y = weight, fill = data),
+    alpha = 0.8
+  ) +
+  geom_line(
+    data = sardine_processing,
+    aes(x = year, y = processing),
+    color = "black",
+    linewidth = 1
+  ) +
+  scale_fill_manual(values = c(
+    "imports" = "firebrick",
+    "landings" = "navy"
+  )) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_si(""))) +
+  xlim(1981, 2025) +
+  labs(
+    title = "West Coast Sardine: Supply vs Processing",
+    subtitle = "Stacked Imports + Landings with Processing Overlay",
+    y = "Total Weight (lbs)",
+    x = "Year",
+    fill = "Source"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(sardine_share, aes(x = year, y = pct_processed)) +
+  geom_line(color = "black", linewidth = 1) +
+  geom_hline(yintercept = 100, linetype = "dashed", color = "gray60") +
+  scale_y_continuous(labels = percent_format(scale = 1)) +
+  xlim(1981, 2025) +
+  labs(
+    title = "Share of Sardine Supply Processed Domestically",
+    subtitle = "Processing as % of (Imports + Landings)",
+    y = "Percent of Supply Processed",
+    x = "Year"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot() +
+  geom_area(
+    data = sardine_sub %>% filter(data %in% c("imports", "landings")),
+    aes(x = year, y = weight, fill = data),
+    alpha = 0.8
+  ) +
+  geom_line(
+    data = sardine_processing,
+    aes(x = year, y = processing),
+    color = "black",
+    linewidth = 1
+  ) +
+  geom_line(
+    data = sardine_share,
+    aes(x = year, y = pct_processed * max(sardine_supply$supply) / 100),
+    color = "darkgreen",
+    linewidth = 1,
+    linetype = "dashed"
+  ) +
+  scale_y_continuous(
+    labels = label_number(scale_cut = cut_si("")),
+    sec.axis = sec_axis(
+      ~ . * 100 / max(sardine_supply$supply),
+      name = "Percent Processed",
+      labels = percent_format(scale = 1)
+    )
+  ) +
+  scale_fill_manual(values = c(
+    "imports" = "firebrick",
+    "landings" = "navy"
+  )) +
+  xlim(1981, 2025) +
+  labs(
+    title = "Sardine Supply and Processing Share",
+    y = "Weight (lbs)",
+    x = "Year",
+    fill = "Source"
+  ) +
+  theme_minimal()
+```
+
+
+# FUNCTION
+```{r}
+wc_supply_processing <- function(
+  wc_obj,               # output from wc_area_plot()
+  species_name,         
+  start_year = 1981,
+  end_year = 2025
+) {
+
+  totals <- wc_obj$totals
+
+
+  # Subset
+  sub <- totals %>%
+    filter(data %in% c("imports", "landings", "processing", "exports"))
+
+
+  # Supply (imports + landings)
+  supply <- sub %>%
+    filter(data %in% c("imports", "landings")) %>%
+    group_by(year) %>%
+    summarise(supply = sum(weight), .groups = "drop")
+
+
+  # Processing totals
+  processing <- sub %>%
+    filter(data == "processing") %>%
+    select(year, processing = weight)
+  
+
+  # Exports totals
+  exports <- sub %>%
+    filter(data == "exports") %>%
+    select(year, exports = weight)
+
+
+  # Share processed
+  share <- supply %>%
+    left_join(processing, by = "year") %>%
+    mutate(
+      processing = ifelse(is.na(processing), 0, processing),
+      pct_processed = 100 * processing / supply
+    )
+
+  max_supply <- max(supply$supply, na.rm = TRUE)
+  
+
+  # exp processed
+  share_exp <- supply %>%
+    left_join(exports, by = "year") %>%
+    mutate(
+      share_2 = (supply - exports)
+    )
+
+
+
+  # Plot 1: Supply vs Processing
+  p_supply <- ggplot() +
+    geom_area(
+      data = sub %>% filter(data %in% c("imports", "landings")),
+      aes(x = year, y = weight, fill = data),
+      alpha = 0.8
+    ) +
+    geom_line(
+      data = processing,
+      aes(x = year, y = processing),
+      color = "cornflowerblue",
+      linewidth = 1
+    ) +
+    scale_fill_manual(values = c(
+      "imports" = "red",
+      "landings" = "firebrick"
+    )) +
+    scale_y_continuous(
+      labels = label_number(scale_cut = cut_si(""))
+    ) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste("West Coast", species_name, ": Supply vs Processing"),
+      subtitle = "Stacked Imports + Landings with Processing Overlay",
+      y = "Total Weight (lbs)",
+      x = "Year",
+      fill = "Source"
+    ) +
+    theme_minimal()
+
+
+  # Plot 2: Percent processed
+  p_pct <- ggplot(share, aes(x = year, y = pct_processed)) +
+    geom_line(color = "black", linewidth = 1) +
+    geom_hline(yintercept = 100, linetype = "dashed", color = "gray60") +
+    scale_y_continuous(labels = percent_format(scale = 1)) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste("Share of", species_name, "Supply Processed Domestically"),
+      subtitle = "Processing as % of (Imports + Landings)",
+      y = "Percent of Supply Processed",
+      x = "Year"
+    ) +
+    theme_minimal()
+  
+
+  # Plot 2.5: Percent processed
+  p_pct_exp <- ggplot(share_exp, aes(x = year, y = share_exp)) +
+    geom_line(color = "black", linewidth = 1) +
+    scale_y_continuous(labels = percent_format(scale = 1)) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste("Share of", species_name, "Supply Processed Domestically"),
+      subtitle = "Processing as % of (Imports + Landings)",
+      y = "Percent of Supply Processed",
+      x = "Year"
+    ) +
+    theme_minimal()
+
+
+  # Plot 3: Dual-axis combo
+  p_combo <- ggplot() +
+    geom_area(
+      data = sub %>% filter(data %in% c("imports", "landings")),
+      aes(x = year, y = weight, fill = data),
+      alpha = 0.8
+    ) +
+    geom_line(
+      data = processing,
+      aes(x = year, y = processing),
+      color = "cornflowerblue",
+      linewidth = 1
+    ) +
+    geom_line(
+      data = share,
+      aes(x = year, y = pct_processed * max_supply / 100),
+      color = "darkgreen",
+      linewidth = 1,
+      linetype = "dashed"
+    ) +
+    scale_y_continuous(
+      labels = label_number(scale_cut = cut_si("")),
+      sec.axis = sec_axis(
+        ~ . * 100 / max_supply,
+        name = "Percent Processed",
+        labels = percent_format(scale = 1)
+      )
+    ) +
+    scale_fill_manual(values = c(
+      "imports" = "red",
+      "landings" = "firebrick"
+    )) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste(species_name, "Supply and Processing Share"),
+      y = "Weight (lbs)",
+      x = "Year",
+      fill = "Source"
+    ) +
+    theme_minimal()
+
+  return(list(
+    sub = sub,
+    supply = supply,
+    processing = processing,
+    share = share,
+    plots = list(
+      supply_vs_processing = p_supply,
+      percent_processed = p_pct,
+      combo = p_combo
+    )
+  ))
+}
+```
+
+
+
+## Run function
+```{r}
+hake_supply <- wc_supply_processing(
+  wc_obj = hake,
+  species_name = "Hake"
+)
+
+hake_supply$plots$supply_vs_processing
+hake_supply$plots$percent_processed
+
+albacore_supply <- wc_supply_processing(
+  wc_obj = albacore,
+  species_name = "Albacore"
+)
+
+albacore_supply$plots$supply_vs_processing
+albacore_supply$plots$percent_processed
+
+sardine_supply <- wc_supply_processing(
+  wc_obj = sardine,
+  species_name = "Sardine"
+)
+
+sardine_supply$plots$supply_vs_processing
+sardine_supply$plots$percent_processed
+sardine_supply$plots$p_pct_exp
+
+squid_supply <- wc_supply_processing(
+  wc_obj = squid,
+  species_name = "Squid"
+)
+
+squid_supply$plots$supply_vs_processing
+squid_supply$plots$percent_processed
+```
+
+
+```{r}
+wc_supply_processing <- function(
+  wc_obj,               # output from wc_area_plot()
+  species_name,         
+  start_year = 1981,
+  end_year = 2023       
+) {
+
+  totals <- wc_obj$totals %>%
+    filter(year <= end_year)
+
+
+  # Subset relevant streams
+  sub <- totals %>%
+    filter(data %in% c("imports", "landings", "processing"))
+
+
+  # Supply (imports + landings)
+  supply <- sub %>%
+    filter(data %in% c("imports", "landings")) %>%
+    group_by(year) %>%
+    summarise(supply = sum(weight), .groups = "drop")
+
+
+  # Processing totals
+  processing <- sub %>%
+    filter(data == "processing") %>%
+    select(year, processing = weight)
+
+  # Share processed
+  share <- supply %>%
+    left_join(processing, by = "year") %>%
+    mutate(
+      processing = ifelse(is.na(processing), 0, processing),
+      pct_processed = 100 * processing / supply
+    )
+
+  # Average percent processed across all years
+  avg_pct_processed <- mean(share$pct_processed, na.rm = TRUE)
+
+  max_supply <- max(supply$supply, na.rm = TRUE)
+
+
+  # Plot 1: Supply vs Processing
+  p_supply <- ggplot() +
+    geom_area(
+      data = sub %>% filter(data %in% c("imports", "landings")),
+      aes(x = year, y = weight, fill = data),
+      alpha = 0.8
+    ) +
+    geom_line(
+      data = processing,
+      aes(x = year, y = processing),
+      color = "cornflowerblue",
+      linewidth = 1
+    ) +
+    scale_fill_manual(values = c(
+      "imports"  = "red",
+      "landings" = "firebrick"
+    )) +
+    scale_y_continuous(
+      labels = label_number(scale_cut = cut_si(""))
+    ) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste("West Coast", species_name, ": Supply vs Processing"),
+      subtitle = "Stacked Imports + Landings with Processing Overlay",
+      y = "Total Weight (lbs)",
+      x = "Year",
+      fill = "Source"
+    ) +
+    theme_minimal()
+
+
+  # Plot 2: Percent processed
+  p_pct <- ggplot(share, aes(x = year, y = pct_processed)) +
+    geom_line(color = "black", linewidth = 1) +
+    geom_hline(
+      yintercept = avg_pct_processed,
+      color = "darkgreen",
+      linewidth = 1,
+      linetype = "dashed"
+    ) +
+    scale_y_continuous(labels = percent_format(scale = 1)) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste("Share of", species_name, "Supply Processed Domestically"),
+      subtitle = paste0(
+        "Processing as % of (Imports + Landings)\n",
+        "Average = (",
+        round(avg_pct_processed, 1), "%)"
+      ),
+      y = "Percent of Supply Processed",
+      x = "Year"
+    ) +
+    theme_minimal()
+
+
+  # Plot 3: Dual-axis combo
+  p_combo <- ggplot() +
+    geom_area(
+      data = sub %>% filter(data %in% c("imports", "landings")),
+      aes(x = year, y = weight, fill = data),
+      alpha = 0.8
+    ) +
+    geom_line(
+      data = processing,
+      aes(x = year, y = processing),
+      color = "cornflowerblue",
+      linewidth = 1
+    ) +
+    geom_line(
+      data = share,
+      aes(x = year, y = pct_processed * max_supply / 100),
+      color = "darkgreen",
+      linewidth = 1,
+      linetype = "dashed"
+    ) +
+    scale_y_continuous(
+      labels = label_number(scale_cut = cut_si("")),
+      sec.axis = sec_axis(
+        ~ . * 100 / max_supply,
+        name = "Percent Processed",
+        labels = percent_format(scale = 1)
+      )
+    ) +
+    scale_fill_manual(values = c(
+      "imports"  = "red",
+      "landings" = "firebrick"
+    )) +
+    xlim(start_year, end_year) +
+    labs(
+      title = paste(species_name, "Supply and Processing Share"),
+      y = "Weight (lbs)",
+      x = "Year",
+      fill = "Source"
+    ) +
+    theme_minimal()
+
+  return(list(
+    sub = sub,
+    supply = supply,
+    processing = processing,
+    share = share,
+    avg_pct_processed = avg_pct_processed,
+    plots = list(
+      supply_vs_processing = p_supply,
+      percent_processed = p_pct,
+      combo = p_combo
+    )
+  ))
+}
+```
+
+```{r}
+## Run function
+
+hake_supply <- wc_supply_processing(
+  wc_obj = hake,
+  species_name = "Hake"
+)
+
+hake_supply$plots$supply_vs_processing
+hake_supply$plots$percent_processed
+
+albacore_supply <- wc_supply_processing(
+  wc_obj = albacore,
+  species_name = "Albacore"
+)
+
+albacore_supply$plots$supply_vs_processing
+albacore_supply$plots$percent_processed
+
+sardine_supply <- wc_supply_processing(
+  wc_obj = sardine,
+  species_name = "Sardine"
+)
+
+sardine_supply$plots$supply_vs_processing
+sardine_supply$plots$percent_processed
+sardine_supply$plots$pct_supply
+
+squid_supply <- wc_supply_processing(
+  wc_obj = squid,
+  species_name = "Squid"
+)
+
+squid_supply$plots$supply_vs_processing
+squid_supply$plots$percent_processed
+```
+```
+

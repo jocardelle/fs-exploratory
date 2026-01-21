@@ -314,7 +314,7 @@ general_products <- c(
   "SABLEFISH" = "SABLEFISH",
   "SQUID" = "SQUID",
   "SHRIMP" = "SHRIMP",
-  "BONITO" = "TUNA",
+  "BONITO" = "BONITO",
   "COD" = "COD",
   "CUCUMBER" = "SEA CUCUMBER",
   "FLOUNDER" = "FLOUNDER",
